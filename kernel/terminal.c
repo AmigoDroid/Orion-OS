@@ -13,6 +13,29 @@ static unsigned int terminal_row;
 static unsigned int terminal_column;
 static u8 terminal_color;
 
+static inline void outb(unsigned short port, unsigned char value)
+{
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"(value), "Nd"(port)
+    );
+}
+
+
+void terminal_update_cursor(void)
+{
+    unsigned short position =
+        terminal_row * VGA_WIDTH + terminal_column;
+
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, (unsigned char)(position & 0xFF));
+
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, (unsigned char)(position >> 8));
+}
+
+
 static u16 make_vga_entry(char c, u8 color)
 {
     return (u8)c | ((u16)color << 8);
@@ -50,6 +73,7 @@ static void terminal_scroll(void)
     terminal_row = VGA_HEIGHT - 1;
 }
 
+
 void terminal_putchar(char c)
 {
     if (c == '\n') {
@@ -69,6 +93,7 @@ void terminal_putchar(char c)
         while (terminal_column < next) {
             terminal_putchar(' ');
         }
+
         return;
     } else {
         VGA_MEMORY[terminal_row * VGA_WIDTH + terminal_column] =
@@ -85,7 +110,10 @@ void terminal_putchar(char c)
     if (terminal_row >= VGA_HEIGHT) {
         terminal_scroll();
     }
+
+    terminal_update_cursor();
 }
+
 
 void terminal_writestring(const char *str)
 {

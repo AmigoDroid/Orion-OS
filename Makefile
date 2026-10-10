@@ -9,6 +9,7 @@ BOOT      = $(BUILD)/boot.bin
 STAGE2    = $(BUILD)/stage2.bin
 KERNEL_O  = $(BUILD)/kernel.o
 TERMINAL_O = $(BUILD)/terminal.o
+KEYBOARD_O = $(BUILD)/keyboard.o
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
 IMAGE     = $(BUILD)/orion.img
@@ -42,8 +43,11 @@ $(KERNEL_O): kernel/kernel.c include/terminal.h | $(BUILD)
 $(TERMINAL_O): kernel/terminal.c include/terminal.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) kernel/linker.ld
-	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O)
+$(KEYBOARD_O): kernel/keyboard.c include/keyboard.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
+$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) kernel/linker.ld
+	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
