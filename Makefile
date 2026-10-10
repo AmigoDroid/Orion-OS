@@ -8,6 +8,7 @@ BUILD     = build
 BOOT      = $(BUILD)/boot.bin
 STAGE2    = $(BUILD)/stage2.bin
 KERNEL_O  = $(BUILD)/kernel.o
+TERMINAL_O = $(BUILD)/terminal.o
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
 IMAGE     = $(BUILD)/orion.img
@@ -35,11 +36,14 @@ $(STAGE2): boot/stage2.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 	test "$$(stat -c %s $@)" -eq 1024
 
-$(KERNEL_O): kernel/kernel.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+$(KERNEL_O): kernel/kernel.c include/terminal.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_O) kernel/linker.ld
-	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O)
+$(TERMINAL_O): kernel/terminal.c include/terminal.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
+$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) kernel/linker.ld
+	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@

@@ -23,7 +23,7 @@ stage2_start:
     xor bx, bx
 
     mov ah, 0x02
-    mov al, 1
+    mov al, 15
     mov ch, 0
     mov cl, 4
     mov dh, 0

@@ -1,18 +1,21 @@
 
-typedef unsigned char  u8;
-typedef unsigned short u16;
+#include "terminal.h"
 
 void kernel_main(void)
 {
-    volatile u16 *video = (volatile u16 *)0xB8000;
+    terminal_initialize();
 
-    const char *mensagem = "ORION OS - Kernel em C iniciado!";
-    unsigned int i = 0;
+    terminal_writestring("================================\n");
+    terminal_writestring("          ORION OS 0.1.0\n");
+    terminal_writestring("================================\n\n");
 
-    while (mensagem[i] != '\0') {
-        video[i] = (u16)mensagem[i] | (u16)(0x0A << 8);
-        i++;
-    }
+    terminal_writestring("Kernel iniciado com sucesso!\n");
+    terminal_writestring("Terminal de texto inicializado.\n\n");
+
+    terminal_writestring("Proximas etapas:\n");
+    terminal_writestring("- Entrada pelo teclado\n");
+    terminal_writestring("- Shell e comandos\n");
+    terminal_writestring("- Gerenciamento de memoria\n");
 
     for (;;) {
         __asm__ volatile ("hlt");
