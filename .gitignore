@@ -1,0 +1,12 @@
+
+# Arquivos gerados pela compilação
+/build/
+
+# Arquivos intermediários e binários
+*.o
+*.elf
+*.bin
+*.img
+
+# Cópias de segurança
+*.bak
