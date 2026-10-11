@@ -1,5 +1,6 @@
 
 #include "keyboard.h"
+#include "gfd.h"
 
 typedef unsigned char u8;
 
@@ -24,11 +25,20 @@ void keyboard_initialize(void)
 int keyboard_getchar(void)
 {
     /* Bit 0 indica que existe um dado disponível. */
-    if ((inb(0x64) & 1) == 0) {
+    u8 status = inb(0x64);
+
+    if ((status & 1) == 0) {
         return -1;
     }
 
     u8 scancode = inb(0x60);
+
+    /* Bit 5 do status: o byte veio do mouse (porta auxiliar), nao do teclado. */
+    if (status & 0x20) {
+        if (gfd_mouse_feed)
+            gfd_mouse_feed(scancode);
+        return -1;
+    }
 
     /* Ignora eventos de soltura da tecla. */
     if (scancode & 0x80) {

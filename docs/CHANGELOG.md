@@ -29,3 +29,10 @@
 - Interface web virou uma area de trabalho (Orion Desktop): janelas, icones, barra de tarefas, menu Iniciar, menu de contexto.
 - Apps: Arquivos, Editor, Terminal, Usuarios (admin) e Configuracoes (papel de parede, senha).
 - Servidor reescrito sem Express: zero dependencias, nao precisa de `npm install` nem de internet.
+
+## Nao lancado
+
+- OrionGFD 0.1.0: interface grafica no kernel (framebuffer, janelas, mouse PS/2, terminal em janela). Substitui o antigo `kernel/gui.c`, que so desenhava um mockup estatico.
+- Corrigido o header Multiboot do `grub_entry.asm` (faltavam 5 campos antes do pedido de video).
+- Corrigido o layout de `multiboot_info` (framebuffer no offset 88, `color_info` no 112).
+- Makefile: alvo `run-grub`.

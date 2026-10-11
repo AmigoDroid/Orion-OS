@@ -14,6 +14,7 @@ KEYBOARD_O = $(BUILD)/keyboard.o
 LOG_O      = $(BUILD)/log.o
 ATA_O      = $(BUILD)/ata.o
 FS_O       = $(BUILD)/fs.o
+GFD_O      = $(BUILD)/gfd.o
 
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
@@ -39,7 +40,7 @@ GRUB_LDFLAGS = -m32 -nostdlib -no-pie \
                -Wl,-T,kernel/grub.ld \
                -Wl,--build-id=none
 
-.PHONY: all run clean rebuild disk web grub
+.PHONY: all run run-grub clean rebuild disk web grub
 
 all: $(IMAGE)
 
@@ -57,13 +58,13 @@ $(STAGE2): boot/stage2.asm | $(BUILD)
 	test "$$(stat -c %s $@)" -eq 1024
 
 # Objetos do kernel
-$(KERNEL_O): kernel/kernel.c include/terminal.h include/keyboard.h include/ata.h include/fs.h | $(BUILD)
+$(KERNEL_O): kernel/kernel.c include/terminal.h include/keyboard.h include/ata.h include/fs.h include/gfd.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
-$(TERMINAL_O): kernel/terminal.c include/terminal.h | $(BUILD)
+$(TERMINAL_O): kernel/terminal.c include/terminal.h include/gfd.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
-$(KEYBOARD_O): kernel/keyboard.c include/keyboard.h | $(BUILD)
+$(KEYBOARD_O): kernel/keyboard.c include/keyboard.h include/gfd.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
 $(LOG_O): kernel/log.c include/log.h | $(BUILD)
@@ -75,8 +76,9 @@ $(ATA_O): kernel/ata.c include/ata.h | $(BUILD)
 $(FS_O): kernel/fs.c include/fs.h include/ata.h include/terminal.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
+
 # Kernel ELF do bootloader original
-$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) kernel/linker.ld
+$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)  kernel/linker.ld
 	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
@@ -110,11 +112,15 @@ run: $(IMAGE) $(DATA_IMG)
 $(GRUB_ENTRY_O): boot/grub_entry.asm | $(BUILD)
 	$(NASM) -f elf32 $< -o $@
 
+# OrionGFD (interface grafica): so entra no build do GRUB
+$(GFD_O): kernel/gfd.c include/gfd.h include/gfd_font.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
 # Kernel ELF separado para o GRUB
-$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) kernel/grub.ld
+$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O) kernel/grub.ld
 	$(CC) $(GRUB_LDFLAGS) -o $@ \
 		$(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) \
-		$(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
+		$(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O)
 
 # ISO inicializável pelo GRUB
 $(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
@@ -125,6 +131,13 @@ $(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
 	@echo "ISO do Orion para GRUB criada: $@"
 
 grub: $(GRUB_ISO)
+
+# Executar a ISO do GRUB (com o OrionGFD)
+run-grub: $(GRUB_ISO) $(DATA_IMG)
+	$(QEMU) -machine pc -m 128M \
+		-cdrom $(GRUB_ISO) \
+		-drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
+		-boot d
 
 # Limpa arquivos de compilação, preservando o disco de dados
 clean:

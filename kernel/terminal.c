@@ -1,5 +1,6 @@
 
 #include "terminal.h"
+#include "gfd.h"
 
 typedef unsigned char  u8;
 typedef unsigned short u16;
@@ -43,6 +44,9 @@ static u16 make_vga_entry(char c, u8 color)
 
 void terminal_clear(void)
 {
+    if (gfd_console_clear && gfd_console_clear())
+        return;
+
     u16 blank = make_vga_entry(' ', terminal_color);
 
     for (unsigned int y = 0; y < VGA_HEIGHT; y++) {
@@ -76,6 +80,9 @@ static void terminal_scroll(void)
 
 void terminal_putchar(char c)
 {
+    if (gfd_console_putchar && gfd_console_putchar(c))
+        return;
+
     if (c == '\n') {
         terminal_column = 0;
         terminal_row++;

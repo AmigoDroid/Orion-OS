@@ -14,6 +14,7 @@ O Orion OS e um sistema operacional experimental com bootloader proprio em Assem
 - Kernel em C com terminal VGA e teclado por polling.
 - OrionFS v2 (ver `docs/ORIONFS.md`): arquivos de ate 4 KB, dono por arquivo.
 - Orion Desktop: area de trabalho no navegador, com usuarios (pasta `web/`).
+- OrionGFD: interface grafica dentro do kernel (boot pelo GRUB, janelas e mouse). Ver `docs/ORIONGFD.md`.
 
 ## Como usar
 
@@ -23,7 +24,8 @@ A area de trabalho web **nao precisa de internet nem de `npm install`**: usa so 
 ```sh
 make            # compila a imagem de boot
 make disk       # cria build/orion-data.img (nao e apagado pelo make clean)
-make run        # abre o Orion no QEMU
+make run        # abre o Orion no QEMU (modo texto)
+make run-grub   # abre a ISO do GRUB com o OrionGFD (interface grafica)
 ```
 
 Comandos do Orion: `help`, `clear`, `ls`, `format`, `create`, `write`, `read`, `rm`.

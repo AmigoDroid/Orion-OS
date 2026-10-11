@@ -2,6 +2,7 @@
 #include "keyboard.h"
 #include "ata.h"
 #include "fs.h"
+#include "gfd.h"
 
 #define PROMPT " orion> "
 #define INPUT_SIZE 256
@@ -40,6 +41,9 @@ void kernel_main(void)
     /* Sem IDT e com interrupcoes desabilitadas (cli no stage2),
        o teclado e lido por polling. Nao use hlt aqui. */
     for (;;) {
+        if (gfd_poll)
+            gfd_poll();
+
         c = keyboard_getchar();
 
         if (c < 0)
