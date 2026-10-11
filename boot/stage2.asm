@@ -13,38 +13,61 @@ stage2_start:
 
     mov [boot_drive], dl
 
-    ; Exibe mensagem
     mov si, mensagem
     call print
 
-    ; Carrega o kernel do setor 4 para 0x10000
+    ; Destino inicial: endereço físico 0x10000
     mov ax, 0x1000
     mov es, ax
     xor bx, bx
 
-    mov ah, 0x02
-    mov al, 15
-    mov ch, 0
-    mov cl, 4
-    mov dh, 0
+    ; O kernel começa no setor 4 do disquete.
+    ; Como o kernel atual tem 8640 bytes (~17 setores), carregamos 20 setores.
+    mov byte [sector], 4
+    mov byte [head], 0
+    mov byte [cylinder], 0
+    mov word [sectors_left], 20
+
+.load_sector:
+    mov ax, 0x0201
+    mov ch, [cylinder]
+    mov cl, [sector]
+    mov dh, [head]
     mov dl, [boot_drive]
     int 0x13
     jc disk_error
 
-    ; Restaura segmentos antes de preparar a GDT
-    xor ax, ax
-    mov es, ax
-    mov ds, ax
+    ; Próximo endereço de destino: 512 bytes adiante.
+    add bx, 512
 
-    ; Carrega a GDT
+    ; Avança para o próximo setor da trilha.
+    inc byte [sector]
+    cmp byte [sector], 19
+    jb .next_sector
+
+    ; Disquete de 1,44 MB: 18 setores por trilha.
+    mov byte [sector], 1
+    xor byte [head], 1
+    cmp byte [head], 0
+    jne .next_sector
+
+    inc byte [cylinder]
+
+.next_sector:
+    dec word [sectors_left]
+    jnz .load_sector
+
+    ; Prepara a GDT.
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
     lgdt [gdt_descriptor]
 
-    ; Ativa o modo protegido de 32 bits
+    ; Entra no modo protegido.
+    cli
     mov eax, cr0
     or eax, 1
     mov cr0, eax
-
-    ; Salto longo para o segmento de código
     jmp dword 0x08:protected_mode_start
 
 print:
@@ -58,6 +81,8 @@ print:
     ret
 
 disk_error:
+    xor ax, ax
+    mov ds, ax
     mov si, erro_msg
     call print
     cli
@@ -68,6 +93,10 @@ disk_error:
 mensagem db 'ORION: carregando kernel...', 13, 10, 0
 erro_msg db 'ORION: erro ao ler kernel!', 13, 10, 0
 boot_drive db 0
+sector db 0
+head db 0
+cylinder db 0
+sectors_left dw 0
 
 align 8
 gdt_start:
@@ -91,7 +120,7 @@ protected_mode_start:
 
     mov esp, 0x90000
 
-    ; Executa kernel_main em 0x10000
+    ; Ponto de entrada do kernel.
     mov eax, 0x10000
     jmp eax
 

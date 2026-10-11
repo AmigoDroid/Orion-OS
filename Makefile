@@ -10,6 +10,9 @@ STAGE2    = $(BUILD)/stage2.bin
 KERNEL_O  = $(BUILD)/kernel.o
 TERMINAL_O = $(BUILD)/terminal.o
 KEYBOARD_O = $(BUILD)/keyboard.o
+LOG_O = $(BUILD)/log.o
+ATA_O = $(BUILD)/ata.o
+FS_O = $(BUILD)/fs.o
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
 IMAGE     = $(BUILD)/orion.img
@@ -46,22 +49,32 @@ $(TERMINAL_O): kernel/terminal.c include/terminal.h | $(BUILD)
 $(KEYBOARD_O): kernel/keyboard.c include/keyboard.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) kernel/linker.ld
-	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O)
+$(LOG_O): kernel/log.c include/log.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
+$(ATA_O): kernel/ata.c include/ata.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
+$(FS_O): kernel/fs.c include/fs.h include/ata.h include/terminal.h | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+
+$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) kernel/linker.ld
+	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 $(IMAGE): $(BOOT) $(STAGE2) $(KERNEL_BIN)
 	cat $(BOOT) $(STAGE2) $(KERNEL_BIN) > $@
+	truncate -s 1474560 $@
 	@echo "Imagem do Orion criada: $(IMAGE)"
 	@stat -c 'Tamanho: %s bytes' $@
 
 run: $(IMAGE)
 	$(QEMU) -machine pc -m 128M \
 		-drive format=raw,file=$(IMAGE),if=floppy \
+		-drive format=raw,file=$(BUILD)/orion-data.img,if=ide,index=0 \
 		-boot a
-
 clean:
 	rm -f $(BUILD)/*
 
