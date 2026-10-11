@@ -3,7 +3,7 @@
 #include "ata.h"
 #include "fs.h"
 
-#define PROMPT "orion> "
+#define PROMPT " orion> "
 #define INPUT_SIZE 256
 
 static char input[INPUT_SIZE];
@@ -28,9 +28,9 @@ void kernel_main(void)
     terminal_writestring("                                 \n");
     terminal_writestring("       -- ORION OS 0.3.0 --      \n");
     terminal_writestring("---------------------------------\n\n");
-    terminal_writestring("Kernel iniciado com sucesso.\n");
-    terminal_writestring("Teclado inicializado.\n");
-    terminal_writestring("Inicializando OrionFS...\n\n");
+    terminal_writestring(" Kernel iniciado com sucesso.\n");
+    terminal_writestring(" Teclado inicializado.\n");
+    terminal_writestring(" Inicializando OrionFS...\n\n");
 
     fs_mount();
 
@@ -159,9 +159,9 @@ static void execute_command(char *line)
         }
 
         if (fs_create(argument, 0)) {
-            terminal_writestring("Nao foi possivel criar o arquivo.\n");
+            terminal_writestring(" Nao foi possivel criar o arquivo.\n");
         } else {
-            terminal_writestring("Arquivo criado.\n");
+            terminal_writestring(" Arquivo criado.\n");
         }
 
         return;
@@ -188,9 +188,9 @@ static void execute_command(char *line)
         }
 
         if (fs_write(argument, content)) {
-            terminal_writestring("Erro ao gravar o arquivo.\n");
+            terminal_writestring(" Erro ao gravar o arquivo.\n");
         } else {
-            terminal_writestring("Arquivo gravado.\n");
+            terminal_writestring(" Arquivo gravado.\n");
         }
 
         return;
@@ -212,20 +212,20 @@ static void execute_command(char *line)
         argument = skip_spaces(command + 3);
 
         if (*argument == '\0') {
-            terminal_writestring("Uso: rm <nome>\n");
+            terminal_writestring(" Uso: rm <nome>\n");
             return;
         }
 
         if (fs_remove(argument)) {
-            terminal_writestring("Nao foi possivel remover o arquivo.\n");
+            terminal_writestring(" Nao foi possivel remover o arquivo.\n");
         } else {
-            terminal_writestring("Arquivo removido.\n");
+            terminal_writestring(" Arquivo removido.\n");
         }
 
         return;
     }
 
-    terminal_writestring("Comando desconhecido: ");
+    terminal_writestring(" Comando desconhecido: ");
     terminal_writestring(command);
     terminal_writestring("\nDigite 'help' para ver os comandos.\n");
 }

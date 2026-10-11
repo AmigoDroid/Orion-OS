@@ -7,15 +7,25 @@ QEMU      = qemu-system-x86_64
 BUILD     = build
 BOOT      = $(BUILD)/boot.bin
 STAGE2    = $(BUILD)/stage2.bin
-KERNEL_O  = $(BUILD)/kernel.o
+
+KERNEL_O   = $(BUILD)/kernel.o
 TERMINAL_O = $(BUILD)/terminal.o
 KEYBOARD_O = $(BUILD)/keyboard.o
-LOG_O = $(BUILD)/log.o
-ATA_O = $(BUILD)/ata.o
-FS_O = $(BUILD)/fs.o
+LOG_O      = $(BUILD)/log.o
+ATA_O      = $(BUILD)/ata.o
+FS_O       = $(BUILD)/fs.o
+
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
-IMAGE     = $(BUILD)/orion.img
+IMAGE      = $(BUILD)/orion.img
+
+DATA_IMG = $(BUILD)/orion-data.img
+
+# Arquivos exclusivos para o boot pelo GRUB
+GRUB_ENTRY_O    = $(BUILD)/grub_entry.o
+GRUB_KERNEL_ELF = $(BUILD)/kernel-grub.elf
+GRUB_ISO         = $(BUILD)/orion-grub.iso
+GRUB_ISO_DIR     = $(BUILD)/iso-grub
 
 CFLAGS = -m32 -ffreestanding -fno-pie \
          -fno-stack-protector \
@@ -25,22 +35,29 @@ LDFLAGS = -m32 -nostdlib -no-pie \
           -Wl,-T,kernel/linker.ld \
           -Wl,--build-id=none
 
-.PHONY: all run clean rebuild disk web
+GRUB_LDFLAGS = -m32 -nostdlib -no-pie \
+               -Wl,-T,kernel/grub.ld \
+               -Wl,--build-id=none
+
+.PHONY: all run clean rebuild disk web grub
 
 all: $(IMAGE)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+# Bootloader original
 $(BOOT): boot/boot.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 	test "$$(stat -c %s $@)" -eq 512
 
+# Segundo estágio do bootloader original
 $(STAGE2): boot/stage2.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 	test "$$(stat -c %s $@)" -eq 1024
 
-$(KERNEL_O): kernel/kernel.c include/terminal.h | $(BUILD)
+# Objetos do kernel
+$(KERNEL_O): kernel/kernel.c include/terminal.h include/keyboard.h include/ata.h include/fs.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
 $(TERMINAL_O): kernel/terminal.c include/terminal.h | $(BUILD)
@@ -58,34 +75,58 @@ $(ATA_O): kernel/ata.c include/ata.h | $(BUILD)
 $(FS_O): kernel/fs.c include/fs.h include/ata.h include/terminal.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
 
+# Kernel ELF do bootloader original
 $(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) kernel/linker.ld
 	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
+# Imagem de disquete original
 $(IMAGE): $(BOOT) $(STAGE2) $(KERNEL_BIN)
 	cat $(BOOT) $(STAGE2) $(KERNEL_BIN) > $@
 	truncate -s 1474560 $@
-	@echo "Imagem do Orion criada: $(IMAGE)"
+	@echo "Imagem original do Orion criada: $(IMAGE)"
 	@stat -c 'Tamanho: %s bytes' $@
 
-DATA_IMG = $(BUILD)/orion-data.img
-
-# Disco de dados do OrionFS (1 MB). Nao e apagado pelo make clean.
+# Disco de dados: só cria se ainda não existir
 $(DATA_IMG): | $(BUILD)
 	dd if=/dev/zero of=$@ bs=1M count=1 2>/dev/null
 
 disk: $(DATA_IMG)
 
+# Servidor web do projeto
 web:
 	cd web && node server.js
 
+# Executar pelo bootloader original
 run: $(IMAGE) $(DATA_IMG)
 	$(QEMU) -machine pc -m 128M \
 		-drive format=raw,file=$(IMAGE),if=floppy \
-		-drive format=raw,file=$(BUILD)/orion-data.img,if=ide,index=0 \
+		-drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
 		-boot a
+
+# Entrada Multiboot do GRUB
+$(GRUB_ENTRY_O): boot/grub_entry.asm | $(BUILD)
+	$(NASM) -f elf32 $< -o $@
+
+# Kernel ELF separado para o GRUB
+$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) kernel/grub.ld
+	$(CC) $(GRUB_LDFLAGS) -o $@ \
+		$(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) \
+		$(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
+
+# ISO inicializável pelo GRUB
+$(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
+	mkdir -p $(GRUB_ISO_DIR)/boot/grub
+	cp $(GRUB_KERNEL_ELF) $(GRUB_ISO_DIR)/boot/kernel-grub.elf
+	cp boot/iso-grub/boot/grub/grub.cfg $(GRUB_ISO_DIR)/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(GRUB_ISO_DIR)
+	@echo "ISO do Orion para GRUB criada: $@"
+
+grub: $(GRUB_ISO)
+
+# Limpa arquivos de compilação, preservando o disco de dados
 clean:
 	find $(BUILD) -mindepth 1 ! -name orion-data.img ! -name .gitkeep -delete
 
