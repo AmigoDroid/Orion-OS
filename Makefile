@@ -11,10 +11,12 @@ STAGE2    = $(BUILD)/stage2.bin
 KERNEL_O   = $(BUILD)/kernel.o
 TERMINAL_O = $(BUILD)/terminal.o
 KEYBOARD_O = $(BUILD)/keyboard.o
+MOUSE_O    = $(BUILD)/mouse.o
 LOG_O      = $(BUILD)/log.o
 ATA_O      = $(BUILD)/ata.o
 FS_O       = $(BUILD)/fs.o
 GFD_O      = $(BUILD)/gfd.o
+PCI_O       = $(BUILD)/pci.o
 
 KERNEL_ELF = $(BUILD)/kernel.elf
 KERNEL_BIN = $(BUILD)/kernel.bin
@@ -25,12 +27,24 @@ DATA_IMG = $(BUILD)/orion-data.img
 # Arquivos exclusivos para o boot pelo GRUB
 GRUB_ENTRY_O    = $(BUILD)/grub_entry.o
 GRUB_KERNEL_ELF = $(BUILD)/kernel-grub.elf
-GRUB_ISO         = $(BUILD)/orion-grub.iso
-GRUB_ISO_DIR     = $(BUILD)/iso-grub
+GRUB_ISO        = $(BUILD)/orion-grub.iso
+GRUB_ISO_DIR    = $(BUILD)/iso-grub
+
+# Dependências automáticas dos cabeçalhos
+DEPFLAGS = -MMD -MP
+
+# Diretórios onde o compilador procura os cabeçalhos
+INCLUDES = -Iinclude \
+           -Ikernel \
+           -Idrivers/keyboard \
+           -Idrivers/mouse \
+           -Idrivers/ata \
+           -Ifs
 
 CFLAGS = -m32 -ffreestanding -fno-pie \
          -fno-stack-protector \
-         -fno-asynchronous-unwind-tables
+         -fno-asynchronous-unwind-tables \
+         $(INCLUDES)
 
 LDFLAGS = -m32 -nostdlib -no-pie \
           -Wl,-T,kernel/linker.ld \
@@ -57,33 +71,54 @@ $(STAGE2): boot/stage2.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 	test "$$(stat -c %s $@)" -eq 1024
 
-# Objetos do kernel
-$(KERNEL_O): kernel/kernel.c include/terminal.h include/keyboard.h include/ata.h include/fs.h include/gfd.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Kernel principal
+$(KERNEL_O): kernel/kernel.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(TERMINAL_O): kernel/terminal.c include/terminal.h include/gfd.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Descoberta de dispositivos PCI
+$(PCI_O): drivers/pci/pci.c drivers/pci/pci.h | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -Idrivers/pci -c $< -o $@
 
-$(KEYBOARD_O): kernel/keyboard.c include/keyboard.h include/gfd.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Terminal
+$(TERMINAL_O): kernel/terminal.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(LOG_O): kernel/log.c include/log.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Teclado
+$(KEYBOARD_O): drivers/keyboard/keyboard.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(ATA_O): kernel/ata.c include/ata.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Mouse
+$(MOUSE_O): drivers/mouse/mouse.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(FS_O): kernel/fs.c include/fs.h include/ata.h include/terminal.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# Logs
+$(LOG_O): kernel/log.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+# Driver ATA
+$(ATA_O): drivers/ata/ata.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+# Sistema de arquivos
+$(FS_O): fs/fs.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Kernel ELF do bootloader original
-$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)  kernel/linker.ld
-	$(CC) $(LDFLAGS) -o $@ $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O)
+$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) \
+               $(MOUSE_O) $(LOG_O) $(ATA_O) $(FS_O) $(PCI_O) \
+               kernel/linker.ld
+	$(CC) $(LDFLAGS) -o $@ \
+		$(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) \
+		$(MOUSE_O) $(LOG_O) $(ATA_O) $(FS_O) $(PCI_O)
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
-
+	@size=$$(stat -c %s $@); \
+	if [ "$$size" -gt 32768 ]; then \
+		echo "ERRO: kernel excede o limite de 64 setores (32768 bytes)."; \
+		rm -f $@; \
+		exit 1; \
+	fi
 # Imagem de disquete original
 $(IMAGE): $(BOOT) $(STAGE2) $(KERNEL_BIN)
 	cat $(BOOT) $(STAGE2) $(KERNEL_BIN) > $@
@@ -112,15 +147,19 @@ run: $(IMAGE) $(DATA_IMG)
 $(GRUB_ENTRY_O): boot/grub_entry.asm | $(BUILD)
 	$(NASM) -f elf32 $< -o $@
 
-# OrionGFD (interface grafica): so entra no build do GRUB
-$(GFD_O): kernel/gfd.c include/gfd.h include/gfd_font.h | $(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -c $< -o $@
+# OrionGFD: interface gráfica
+$(GFD_O): kernel/gfd.c | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Kernel ELF separado para o GRUB
-$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O) kernel/grub.ld
+$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) \
+                    $(TERMINAL_O) $(KEYBOARD_O) $(MOUSE_O) \
+                    $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O) $(PCI_O) \
+                    kernel/grub.ld
 	$(CC) $(GRUB_LDFLAGS) -o $@ \
 		$(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) \
-		$(KEYBOARD_O) $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O)
+		$(KEYBOARD_O) $(MOUSE_O) $(LOG_O) \
+		$(ATA_O) $(FS_O) $(GFD_O) $(PCI_O)
 
 # ISO inicializável pelo GRUB
 $(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
@@ -132,12 +171,15 @@ $(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
 
 grub: $(GRUB_ISO)
 
-# Executar a ISO do GRUB (com o OrionGFD)
+# Executar a ISO do GRUB
 run-grub: $(GRUB_ISO) $(DATA_IMG)
 	$(QEMU) -machine pc -m 128M \
 		-cdrom $(GRUB_ISO) \
 		-drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
 		-boot d
+
+# Carrega as dependências geradas automaticamente pelo GCC
+-include $(wildcard $(BUILD)/*.d)
 
 # Limpa arquivos de compilação, preservando o disco de dados
 clean:

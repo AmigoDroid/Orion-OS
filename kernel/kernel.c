@@ -1,8 +1,5 @@
-#include "terminal.h"
-#include "keyboard.h"
-#include "ata.h"
-#include "fs.h"
-#include "gfd.h"
+
+#include "kernel_includes.h"
 
 #define PROMPT " orion> "
 #define INPUT_SIZE 256
@@ -20,8 +17,10 @@ void kernel_main(void)
 
     terminal_initialize();
     keyboard_initialize();
+    mouse_initialize();
+    pci_initialize();
 
-   terminal_writestring("       ___  ____  _              \n");
+    terminal_writestring("       ___  ____  _              \n");
     terminal_writestring("      / _ \\|  _ \\(_) ___  _ __   \n");
     terminal_writestring("     | | | | |_) | |/ _ \\| '_ \\  \n");
     terminal_writestring("     | |_| |  _ <| | (_) | | | | \n");
@@ -31,6 +30,7 @@ void kernel_main(void)
     terminal_writestring("---------------------------------\n\n");
     terminal_writestring(" Kernel iniciado com sucesso.\n");
     terminal_writestring(" Teclado inicializado.\n");
+    terminal_writestring(" Mouse inicializado.\n");
     terminal_writestring(" Inicializando OrionFS...\n\n");
 
     fs_mount();
@@ -43,7 +43,7 @@ void kernel_main(void)
     for (;;) {
         if (gfd_poll)
             gfd_poll();
-
+        mouse_poll();
         c = keyboard_getchar();
 
         if (c < 0)
@@ -105,6 +105,7 @@ static void print_help(void)
 {
     terminal_writestring("\nComandos do Orion OS:\n\n");
     terminal_writestring("  help                  Mostra esta ajuda\n");
+    terminal_writestring("  pci                   Lista dispositivos PCI\n");
     terminal_writestring("  clear                 Limpa a tela\n");
     terminal_writestring("  ls                    Lista os arquivos\n");
     terminal_writestring("  format                Formata o OrionFS\n");
@@ -123,6 +124,11 @@ static void execute_command(char *line)
 
     if (*command == '\0')
         return;
+
+    if (string_equal(command, "pci")) {
+        pci_list_devices();
+        return;
+    }
 
     if (string_equal(command, "help")) {
         print_help();

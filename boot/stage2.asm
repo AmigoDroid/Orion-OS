@@ -26,7 +26,7 @@ stage2_start:
     mov byte [sector], 4
     mov byte [head], 0
     mov byte [cylinder], 0
-    mov word [sectors_left], 20
+    mov word [sectors_left], 64
 
 .load_sector:
     mov ax, 0x0201

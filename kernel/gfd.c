@@ -150,25 +150,42 @@ static void fill_rect(int x, int y, int w, int h, uint32_t color)
     }
 }
 
-static void draw_char(int x, int y, char ch, uint32_t fg, uint32_t bg,
-                      int opaque)
+static const unsigned char gfd_glyph_Ccedilla[16] = {
+    0x1C, 0x22, 0x40, 0x40,
+    0x40, 0x40, 0x22, 0x1C,
+    0x08, 0x10, 0x20, 0x00,
+    0x00, 0x00, 0x00, 0x00
+};
+
+static const unsigned char gfd_glyph_ccedilla[16] = {
+0x00, 0x00, 0x00, 0x1C,
+0x22, 0x40, 0x40, 0x40,
+0x22, 0x1C, 0x08, 0x10,
+0x20, 0x00, 0x00, 0x00
+};
+static void draw_char(int x, int y, unsigned char ch,
+uint32_t fg, uint32_t bg, int opaque)
 {
-    if (ch < 32 || ch > 126)
-        ch = ' ';
-
-    const unsigned char *g = gfd_font[ch - 32];
-
-    for (int r = 0; r < FONT_H; r++) {
-        unsigned char bits = g[r];
-        for (int c = 0; c < FONT_W; c++) {
-            if (bits & (0x80u >> c))
-                pixel(x + c, y + r, fg);
-            else if (opaque)
-                pixel(x + c, y + r, bg);
-        }
-    }
+const unsigned char *g;
+if (ch == 0x80) {
+g = gfd_glyph_Ccedilla;
+} else if (ch == 0x87) {
+g = gfd_glyph_ccedilla;
+} else {
+if (ch < 32 || ch > 126)
+ch = ' ';
+g = gfd_font[ch - 32];
 }
-
+for (int r = 0; r < FONT_H; r++) {
+unsigned char bits = g[r];
+for (int c = 0; c < FONT_W; c++) {
+if (bits & (0x80u >> c))
+pixel(x + c, y + r, fg);
+else if (opaque)
+pixel(x + c, y + r, bg);
+}
+}
+}
 static void draw_text(int x, int y, const char *s, uint32_t fg)
 {
     for (; *s; s++, x += FONT_W)
