@@ -9,6 +9,7 @@
 #include "../drivers/mouse/mouse.h"
 #include "../drivers/ata/ata.h"
 #include "../drivers/pci/pci.h"
+#include "../drivers/usb/usb.h"
 
 /* =========================
    SISTEMA DE ARQUIVOS

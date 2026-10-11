@@ -17,7 +17,7 @@ struct pci_device {
     unsigned char header_type;
 };
 
-static struct pci_device devices[PCI_MAX_DEVICES];
+static struct pci_device_info devices[PCI_MAX_DEVICES];
 static unsigned int stored_devices = 0;
 static unsigned int total_devices = 0;
 
@@ -59,7 +59,7 @@ static void pci_register_device(
     unsigned int id;
     unsigned int class_info;
     unsigned int header_info;
-    struct pci_device *dev;
+    struct pci_device_info *dev;
 
     id = pci_read_config(bus, slot, function, 0x00);
 
@@ -174,7 +174,7 @@ void pci_list_devices(void)
     }
 
     for (i = 0; i < stored_devices; i++) {
-        struct pci_device *dev = &devices[i];
+        struct pci_device_info *dev = &devices[i];
 
         terminal_writestring("\nPCI ");
         print_hex(dev->bus, 2);
@@ -211,3 +211,18 @@ void pci_list_devices(void)
     print_hex(total_devices, 4);
     terminal_writestring("\n");
 }
+
+unsigned int pci_device_count(void)
+{
+    return stored_devices;
+}
+
+int pci_get_device(unsigned int index, struct pci_device_info *out)
+{
+    if (out == 0 || index >= stored_devices)
+        return 0;
+
+    *out = devices[index];
+    return 1;
+}
+

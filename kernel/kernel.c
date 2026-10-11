@@ -19,6 +19,7 @@ void kernel_main(void)
     keyboard_initialize();
     mouse_initialize();
     pci_initialize();
+    usb_initialize();
 
     terminal_writestring("       ___  ____  _              \n");
     terminal_writestring("      / _ \\|  _ \\(_) ___  _ __   \n");
