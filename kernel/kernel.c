@@ -2,13 +2,66 @@
 #include "keyboard.h"
 #include "ata.h"
 #include "fs.h"
-#include "log.h"
 
 #define PROMPT "orion> "
 #define INPUT_SIZE 256
 
 static char input[INPUT_SIZE];
 
+static void execute_command(char *line);
+
+/* Fica no inicio do .text (ver linker.ld): o stage2 salta para 0x10000. */
+__attribute__((section(".text.start")))
+void kernel_main(void)
+{
+    unsigned int input_length = 0;
+    int c;
+
+    terminal_initialize();
+    keyboard_initialize();
+
+   terminal_writestring("       ___  ____  _              \n");
+    terminal_writestring("      / _ \\|  _ \\(_) ___  _ __   \n");
+    terminal_writestring("     | | | | |_) | |/ _ \\| '_ \\  \n");
+    terminal_writestring("     | |_| |  _ <| | (_) | | | | \n");
+    terminal_writestring("      \\___/|_| \\_\\_|\\___/|_| |_| \n");
+    terminal_writestring("                                 \n");
+    terminal_writestring("       -- ORION OS 0.3.0 --      \n");
+    terminal_writestring("---------------------------------\n\n");
+    terminal_writestring("Kernel iniciado com sucesso.\n");
+    terminal_writestring("Teclado inicializado.\n");
+    terminal_writestring("Inicializando OrionFS...\n\n");
+
+    fs_mount();
+
+    terminal_writestring("Digite 'help' para ver os comandos.\n\n");
+    terminal_writestring(PROMPT);
+
+    /* Sem IDT e com interrupcoes desabilitadas (cli no stage2),
+       o teclado e lido por polling. Nao use hlt aqui. */
+    for (;;) {
+        c = keyboard_getchar();
+
+        if (c < 0)
+            continue;
+
+        if (c == '\n') {
+            terminal_putchar('\n');
+            input[input_length] = '\0';
+            execute_command(input);
+            input_length = 0;
+            terminal_writestring(PROMPT);
+        } else if (c == '\b') {
+            if (input_length > 0) {
+                input_length--;
+                terminal_putchar('\b');
+            }
+        } else if (input_length < INPUT_SIZE - 1) {
+            input[input_length++] = (char)c;
+            terminal_putchar((char)c);
+        }
+    }
+}
 
 static int string_equal(const char *a, const char *b)
 {
@@ -105,7 +158,7 @@ static void execute_command(char *line)
             return;
         }
 
-        if (fs_create(argument)) {
+        if (fs_create(argument, 0)) {
             terminal_writestring("Nao foi possivel criar o arquivo.\n");
         } else {
             terminal_writestring("Arquivo criado.\n");

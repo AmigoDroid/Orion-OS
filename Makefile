@@ -25,7 +25,7 @@ LDFLAGS = -m32 -nostdlib -no-pie \
           -Wl,-T,kernel/linker.ld \
           -Wl,--build-id=none
 
-.PHONY: all run clean rebuild
+.PHONY: all run clean rebuild disk web
 
 all: $(IMAGE)
 
@@ -70,13 +70,24 @@ $(IMAGE): $(BOOT) $(STAGE2) $(KERNEL_BIN)
 	@echo "Imagem do Orion criada: $(IMAGE)"
 	@stat -c 'Tamanho: %s bytes' $@
 
-run: $(IMAGE)
+DATA_IMG = $(BUILD)/orion-data.img
+
+# Disco de dados do OrionFS (1 MB). Nao e apagado pelo make clean.
+$(DATA_IMG): | $(BUILD)
+	dd if=/dev/zero of=$@ bs=1M count=1 2>/dev/null
+
+disk: $(DATA_IMG)
+
+web:
+	cd web && node server.js
+
+run: $(IMAGE) $(DATA_IMG)
 	$(QEMU) -machine pc -m 128M \
 		-drive format=raw,file=$(IMAGE),if=floppy \
 		-drive format=raw,file=$(BUILD)/orion-data.img,if=ide,index=0 \
 		-boot a
 clean:
-	rm -f $(BUILD)/*
+	find $(BUILD) -mindepth 1 ! -name orion-data.img ! -name .gitkeep -delete
 
 rebuild: clean
 	$(MAKE) all

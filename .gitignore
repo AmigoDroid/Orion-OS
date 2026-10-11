@@ -10,3 +10,7 @@
 
 # Cópias de segurança
 *.bak
+
+# Interface web
+/web/node_modules/
+/web/data/

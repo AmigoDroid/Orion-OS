@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orion Desktop</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login" class="screen">
+    <form id="loginForm" class="card">
+      <h1>ORION<span>OS</span></h1>
+      <input id="loginUser" placeholder="usuário" autocomplete="username" required>
+      <input id="loginPass" type="password" placeholder="senha" autocomplete="current-password" required>
+      <button type="submit">Entrar</button>
+      <p id="loginMsg" class="err"></p>
+    </form>
+  </div>
+
+  <div id="shell" hidden>
+    <div id="desk"><div id="icons"></div></div>
+    <div id="startmenu" hidden></div>
+    <div id="taskbar">
+      <button id="start">◆ Orion</button>
+      <div id="tasks"></div>
+      <span id="who"></span>
+      <span id="clock"></span>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

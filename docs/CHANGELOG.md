@@ -14,3 +14,18 @@
 - Implementar funções de terminal.
 - Adicionar entrada de teclado.
 - Criar os comandos iniciais do Orion.
+
+## 0.3.0
+
+- Terminal interativo: o kernel agora le o teclado e executa os comandos.
+- OrionFS v2: 64 arquivos, ate 4096 bytes cada (multi-setor), uid do dono por arquivo.
+- Interface web com login, usuarios (admin/user), editor de arquivos e administracao.
+- Corrigido o `hlt` com interrupcoes desligadas no fim do `kernel_main`.
+- Corrigido o loop infinito de `\t` no terminal.
+- Makefile: alvo `disk`, `make clean` preserva `orion-data.img`.
+
+## 0.4.0
+
+- Interface web virou uma area de trabalho (Orion Desktop): janelas, icones, barra de tarefas, menu Iniciar, menu de contexto.
+- Apps: Arquivos, Editor, Terminal, Usuarios (admin) e Configuracoes (papel de parede, senha).
+- Servidor reescrito sem Express: zero dependencias, nao precisa de `npm install` nem de internet.

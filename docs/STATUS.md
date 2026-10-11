@@ -1,30 +1,21 @@
 # Estado atual do Orion OS
 
-## Versão 0.1.0
+## Versão 0.4.0
 
 ### Funcionando
-- [x] Bootloader em Assembly.
-- [x] Segundo estágio de inicialização.
-- [x] Carregamento do kernel a partir do disco.
-- [x] Entrada no modo protegido de 32 bits.
-- [x] Kernel em C.
-- [x] Escrita de texto na memória de vídeo.
-- [x] Inicialização testada no QEMU.
+- [x] Bootloader em Assembly e segundo estágio.
+- [x] Modo protegido de 32 bits e kernel em C.
+- [x] Terminal interativo com teclado (polling) e comandos básicos.
+- [x] OrionFS v2 (64 arquivos, até 4 KB cada, dono por arquivo).
+- [x] Orion Desktop: área de trabalho web com usuários, sem dependências.
 
 ### Em desenvolvimento
-- [ ] Terminal interativo.
-- [ ] Leitura do teclado.
-- [ ] Comandos básicos.
-- [ ] Tratamento de interrupções.
+- [ ] Tratamento de interrupções e temporizador.
 - [ ] Gerenciamento de memória.
-- [ ] Temporizador.
+- [ ] Teclado com Shift (maiúsculas e símbolos).
 - [ ] Migração para 64 bits.
 
-### Próximo objetivo
-Implementar um terminal que aceite comandos digitados pelo usuário.
-
 ### Limitações atuais
-- Não possui multitarefa.
-- Não possui sistema de arquivos próprio.
-- Ainda não possui drivers completos.
-- Está em fase experimental.
+- Sem multitarefa e sem login no kernel (usuários existem só na interface web).
+- Não use a interface web e o QEMU ao mesmo tempo no mesmo disco.
+- Conteúdo dos arquivos limitado a ASCII (a interface remove acentos).

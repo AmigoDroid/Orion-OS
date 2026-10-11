@@ -1,40 +1,52 @@
 # Orion OS
 
-**Versão:** 0.1.0  
+**Versao:** 0.4.0  
 **Estado:** Desenvolvimento experimental  
 **Arquitetura atual:** x86 de 32 bits (i386)
 
 ## Sobre o projeto
 
-O Orion OS é um sistema operacional experimental desenvolvido do zero, com bootloader próprio em Assembly e kernel em C.
-
-O objetivo é construir progressivamente um sistema independente, com gerenciamento de memória, entrada pelo teclado, terminal de comandos e, futuramente, suporte a 64 bits.
+O Orion OS e um sistema operacional experimental com bootloader proprio em Assembly e kernel em C.
 
 ## Componentes atuais
 
-- Bootloader de primeiro estágio em Assembly.
-- Segundo estágio de carregamento.
-- Transição para o modo protegido de 32 bits.
-- Kernel em C compilado em modo freestanding.
-- Escrita de texto diretamente na memória de vídeo.
-- Inicialização testada no emulador QEMU.
+- Bootloader em dois estagios e entrada no modo protegido de 32 bits.
+- Kernel em C com terminal VGA e teclado por polling.
+- OrionFS v2 (ver `docs/ORIONFS.md`): arquivos de ate 4 KB, dono por arquivo.
+- Orion Desktop: area de trabalho no navegador, com usuarios (pasta `web/`).
 
-## Próximas etapas
+## Como usar
 
-1. Criar funções próprias para o terminal.
-2. Implementar leitura do teclado.
-3. Desenvolver os primeiros comandos.
-4. Implementar interrupções e temporizador.
-5. Desenvolver gerenciamento de memória.
-6. Planejar a migração para x86-64.
+Requisitos: `nasm`, `gcc` (com suporte a `-m32`), `qemu-system-x86_64` e Node.js 18+.
+A area de trabalho web **nao precisa de internet nem de `npm install`**: usa so modulos nativos do Node.
 
-## Ambiente de desenvolvimento
+```sh
+make            # compila a imagem de boot
+make disk       # cria build/orion-data.img (nao e apagado pelo make clean)
+make run        # abre o Orion no QEMU
+```
 
-- Sistema usado para desenvolver: Ubuntu.
-- Linguagens: C e Assembly.
-- Ferramentas: GCC, NASM, GNU Make e QEMU.
+Comandos do Orion: `help`, `clear`, `ls`, `format`, `create`, `write`, `read`, `rm`.
+Na primeira vez, rode `format`.
 
-## Observação
+## Orion Desktop (area de trabalho web)
 
-O Orion OS está em fase experimental. A versão 0.1.0 identifica a primeira etapa funcional do projeto, não uma versão pronta para uso geral.
+```sh
+make web        # ou: node web/server.js
+```
 
+Abra http://127.0.0.1:3000. No primeiro uso o usuario `admin` e criado com uma
+senha aleatoria mostrada no terminal (ou defina `ADMIN_PASSWORD`).
+
+Recursos: login, janelas (mover, redimensionar, minimizar, maximizar), icones dos
+seus arquivos na area de trabalho, gerenciador de arquivos, editor (Ctrl+S),
+terminal com os comandos do Orion, administracao de usuarios e papel de parede.
+Clique direito na area de trabalho ou num icone abre o menu de contexto.
+
+Variaveis: `PORT`, `HOST`, `ORION_DISK`, `DATA_DIR`, `COOKIE_SECURE=1` (atras de HTTPS).
+
+**Importante:** nao use a area de trabalho e o QEMU ao mesmo tempo no mesmo
+`orion-data.img`. O kernel nao conhece o cache do servidor e vice-versa. Feche um
+antes de abrir o outro.
+
+Testes: `cd web && npm test` (usa apenas `node:test`, nativo).

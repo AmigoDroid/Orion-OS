@@ -88,11 +88,10 @@ void terminal_putchar(char c)
                 make_vga_entry(' ', terminal_color);
         }
     } else if (c == '\t') {
-        unsigned int next = (terminal_column + 4) & ~3u;
+        unsigned int spaces = 4 - (terminal_column % 4);
 
-        while (terminal_column < next) {
+        for (unsigned int i = 0; i < spaces; i++)
             terminal_putchar(' ');
-        }
 
         return;
     } else {
