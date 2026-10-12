@@ -1,6 +1,6 @@
 # Orion OS
 
-**Versao:** 0.4.0  
+**Versao:** 0.5.0  
 **Estado:** Desenvolvimento experimental  
 **Arquitetura atual:** x86 de 32 bits (i386)
 
@@ -18,17 +18,19 @@ O Orion OS e um sistema operacional experimental com bootloader proprio em Assem
 
 ## Como usar
 
-Requisitos: `nasm`, `gcc` (com suporte a `-m32`), `qemu-system-x86_64` e Node.js 18+.
+Requisitos: `nasm`, `gcc` (`-m32`), `ld`, `qemu-system-i386`, `grub-mkrescue` + `xorriso` + `mtools`, `python3` (testes) e Node.js 18+ (so para a area de trabalho web).
 A area de trabalho web **nao precisa de internet nem de `npm install`**: usa so modulos nativos do Node.
 
 ```sh
-make            # compila a imagem de boot
-make disk       # cria build/orion-data.img (nao e apagado pelo make clean)
-make run        # abre o Orion no QEMU (modo texto)
-make run-grub   # abre a ISO do GRUB com o OrionGFD (interface grafica)
+make            # kernel + ISO (GRUB) + imagem (bootloader proprio)
+make run        # QEMU pela ISO do GRUB (grafico)
+make run BOOT=native   # QEMU pelo bootloader proprio
+make test       # boot automatico das duas imagens + autoteste de memoria
+make help       # todos os alvos
 ```
 
-Comandos do Orion: `help`, `clear`, `ls`, `format`, `create`, `write`, `read`, `rm`.
+Comandos do Orion: `help`, `info`, `clear`, `ls`, `format`, `create`, `write`, `read`, `rm`, `mem`, `memmap`, `vmm`, `heapcheck`, `memtest`, `crash`, `reboot`, `halt`.
+Docs: `BOOT.md`, `MEMORY.md`, `STRUCTURE.md`.
 Na primeira vez, rode `format`.
 
 ## Orion Desktop (area de trabalho web)

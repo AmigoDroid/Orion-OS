@@ -1,252 +1,188 @@
+# =============================================================================
+# Orion OS - Makefile unico
+#
+# Ha UM kernel (build/orion.elf) e DUAS formas de dar boot nele, as duas
+# entregando exatamente o mesmo contrato Multiboot (EAX=magic, EBX=info):
+#
+#   make iso      -> build/orion.iso   (GRUB: grafico OrionGFD ou texto)
+#   make img      -> build/orion.img   (bootloader proprio, disquete 1,44 MB)
+#
+# `make` sozinho gera os dois. `make help` lista tudo.
+# Para acrescentar um .c/.asm novo basta cria-lo dentro de uma das pastas
+# de codigo: o Makefile descobre sozinho (nada de lista de objetos manual).
+# =============================================================================
 
-NASM      = nasm
-CC        = gcc
-OBJCOPY   = objcopy
-QEMU      = qemu-system-x86_64
+VERSION := $(strip $(shell cat docs/VERSION 2>/dev/null || echo dev))
 
-BUILD     = build
-BOOT      = $(BUILD)/boot.bin
-STAGE2    = $(BUILD)/stage2.bin
+# --- ferramentas -------------------------------------------------------------
+NASM  ?= nasm
+CC    ?= gcc
+LD    ?= ld
+NM    ?= nm
+OBJCOPY ?= objcopy
+QEMU  ?= qemu-system-i386
+GRUB_MKRESCUE := $(firstword $(shell command -v grub-mkrescue grub2-mkrescue 2>/dev/null))
+GRUB_FILE     := $(firstword $(shell command -v grub-file grub2-file 2>/dev/null))
 
-KERNEL_O   = $(BUILD)/kernel.o
-TERMINAL_O = $(BUILD)/terminal.o
-KEYBOARD_O = $(BUILD)/keyboard.o
-MOUSE_O    = $(BUILD)/mouse.o
-LOG_O      = $(BUILD)/log.o
-ATA_O      = $(BUILD)/ata.o
-FS_O       = $(BUILD)/fs.o
-GFD_O      = $(BUILD)/gfd.o
-PCI_O      = $(BUILD)/pci.o
+# --- pastas ------------------------------------------------------------------
+BUILD    := build
+OBJ      := $(BUILD)/obj
+SRC_DIRS := arch kernel lib mm gfx fs drivers
 
-USB_O            = $(BUILD)/usb.o
-USB_CONTROLLER_O = $(BUILD)/usb_controller.o
-USB_DEVICE_O     = $(BUILD)/usb_device.o
+# --- saidas ------------------------------------------------------------------
+KERNEL_ELF := $(BUILD)/orion.elf
+KERNEL_BIN := $(BUILD)/orion.bin
+ISO        := $(BUILD)/orion.iso
+IMG        := $(BUILD)/orion.img
+DATA_IMG   := $(BUILD)/orion-data.img
+STAGE1_BIN := $(BUILD)/stage1.bin
+STAGE2_BIN := $(BUILD)/stage2.bin
+ISO_DIR    := $(BUILD)/iso
 
-KERNEL_ELF = $(BUILD)/kernel.elf
-KERNEL_BIN = $(BUILD)/kernel.bin
-IMAGE      = $(BUILD)/orion.img
+# --- fontes descobertos automaticamente --------------------------------------
+C_SRCS   := $(shell find $(SRC_DIRS) -name '*.c' | sort)
+ASM_SRCS := $(shell find $(SRC_DIRS) -name '*.asm' | sort)
+OBJS     := $(C_SRCS:%.c=$(OBJ)/%.o) $(ASM_SRCS:%.asm=$(OBJ)/%.o)
+INCDIRS  := include $(sort $(patsubst %/,%,$(dir $(shell find $(SRC_DIRS) include -name '*.h'))))
 
-DATA_IMG = $(BUILD)/orion-data.img
+CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-pie \
+          -fno-stack-protector -fno-asynchronous-unwind-tables \
+          -fcf-protection=none -mno-sse -mno-mmx -mno-80387 \
+          -Wall -Wextra -Wno-unused-parameter \
+          -DORION_VERSION=\"$(VERSION)\" \
+          $(addprefix -I,$(INCDIRS)) -MMD -MP
 
-# Arquivos exclusivos para o boot pelo GRUB
-GRUB_ENTRY_O    = $(BUILD)/grub_entry.o
-GRUB_KERNEL_ELF = $(BUILD)/kernel-grub.elf
-GRUB_ISO        = $(BUILD)/orion-grub.iso
-GRUB_ISO_DIR    = $(BUILD)/iso-grub
+LDFLAGS := -m elf_i386 -nostdlib -z max-page-size=0x1000 -z noseparate-code \
+           --build-id=none -T arch/i386/linker.ld
 
-# Dependencias automaticas dos cabecalhos
-DEPFLAGS = -MMD -MP
+# memset/memcpy nao podem virar chamadas a si mesmos:
+$(OBJ)/lib/string.o: CFLAGS += -fno-tree-loop-distribute-patterns
 
-# Diretorios de cabecalhos
-INCLUDES = -Iinclude \
-           -Ikernel \
-           -Idrivers/keyboard \
-           -Idrivers/mouse \
-           -Idrivers/ata \
-           -Idrivers/pci \
-           -Idrivers/usb \
-           -Idrivers/usb/controllers \
-           -Idrivers/usb/devices \
-           -Ifs
+# --- QEMU --------------------------------------------------------------------
+QEMU_FLAGS := -machine pc -m 128M \
+              -drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
+              -debugcon file:$(BUILD)/debug.log
 
-CFLAGS = -m32 -ffreestanding -fno-pie \
-         -fno-stack-protector \
-         -fno-asynchronous-unwind-tables \
-         $(INCLUDES)
+.PHONY: all kernel iso img run run-native run-text run-grub grub disk web \
+        test size clean distclean rebuild help
 
-LDFLAGS = -m32 -nostdlib -no-pie \
-          -Wl,-T,kernel/linker.ld \
-          -Wl,--build-id=none
+all: iso img
+	@echo
+	@echo "Orion $(VERSION) pronto:  $(ISO)  e  $(IMG)"
 
-GRUB_LDFLAGS = -m32 -nostdlib -no-pie \
-               -Wl,-T,kernel/grub.ld \
-               -Wl,--build-id=none
+kernel: $(KERNEL_ELF)
+iso: $(ISO)
+img: $(IMG)
+grub: iso
+disk: $(DATA_IMG)
 
-.PHONY: all run run-grub clean rebuild disk web grub
+# --- compilacao --------------------------------------------------------------
+# make V=1 mostra os comandos completos
+Q := $(if $(V),,@)
+$(OBJ)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "  CC   $<"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
 
-all: $(IMAGE)
+$(OBJ)/%.o: %.asm
+	@mkdir -p $(dir $@)
+	@echo "  ASM  $<"
+	$(Q)$(NASM) -f elf32 $< -o $@
 
-$(BUILD):
-	mkdir -p $(BUILD)
-
-# ============================================================
-# BOOTLOADER ORIGINAL
-# ============================================================
-
-$(BOOT): boot/boot.asm | $(BUILD)
-	$(NASM) -f bin $< -o $@
-	test "$$(stat -c %s $@)" -eq 512
-
-$(STAGE2): boot/stage2.asm | $(BUILD)
-	$(NASM) -f bin $< -o $@
-	test "$$(stat -c %s $@)" -eq 1024
-
-$(GRUB_ENTRY_O): boot/grub_entry.asm | $(BUILD)
-	$(NASM) -f elf32 $< -o $@
-
-# ============================================================
-# OBJETOS DO KERNEL
-# ============================================================
-
-$(KERNEL_O): kernel/kernel.c kernel/kernel_includes.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(TERMINAL_O): kernel/terminal.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(KEYBOARD_O): drivers/keyboard/keyboard.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(MOUSE_O): drivers/mouse/mouse.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(LOG_O): kernel/log.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(ATA_O): drivers/ata/ata.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(FS_O): fs/fs.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-$(GFD_O): kernel/gfd.c | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-# ============================================================
-# PCI
-# ============================================================
-
-$(PCI_O): drivers/pci/pci.c drivers/pci/pci.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-# ============================================================
-# USB - NUCLEO
-# ============================================================
-
-$(USB_O): drivers/usb/usb.c drivers/usb/usb.h \
-          drivers/pci/pci.h \
-          drivers/usb/controllers/usb_controller.h \
-          drivers/usb/devices/usb_device.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-# ============================================================
-# USB - IDENTIFICACAO DOS CONTROLADORES
-# ============================================================
-
-$(USB_CONTROLLER_O): drivers/usb/controllers/usb_controller.c \
-                     drivers/usb/controllers/usb_controller.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-# ============================================================
-# USB - ESTRUTURA DOS DISPOSITIVOS
-# ============================================================
-
-$(USB_DEVICE_O): drivers/usb/devices/usb_device.c \
-                 drivers/usb/devices/usb_device.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
-# ============================================================
-# KERNEL ELF - BOOTLOADER ORIGINAL
-# ============================================================
-
-$(KERNEL_ELF): $(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) \
-               $(MOUSE_O) $(LOG_O) $(ATA_O) $(FS_O) $(PCI_O) \
-               $(USB_O) $(USB_CONTROLLER_O) $(USB_DEVICE_O) \
-               kernel/linker.ld
-	$(CC) $(LDFLAGS) -o $@ \
-		$(KERNEL_O) $(TERMINAL_O) $(KEYBOARD_O) \
-		$(MOUSE_O) $(LOG_O) $(ATA_O) $(FS_O) $(PCI_O) \
-		$(USB_O) $(USB_CONTROLLER_O) $(USB_DEVICE_O)
+$(KERNEL_ELF): $(OBJS) arch/i386/linker.ld
+	@echo "  LD   $@"
+	$(Q)$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	@$(NM) $@ | grep -q ' T _start$$' || { echo "ERRO: _start nao encontrado"; exit 1; }
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
-	@size=$$(stat -c %s $@); \
-	if [ "$$size" -gt 32768 ]; then \
-		echo "ERRO: kernel excede o limite de 64 setores (32768 bytes)."; \
-		rm -f $@; \
-		exit 1; \
-	fi
 
-$(IMAGE): $(BOOT) $(STAGE2) $(KERNEL_BIN)
-	cat $(BOOT) $(STAGE2) $(KERNEL_BIN) > $@
+# --- ISO (GRUB) --------------------------------------------------------------
+$(ISO): $(KERNEL_ELF) boot/grub/grub.cfg
+	@test -n "$(GRUB_MKRESCUE)" || { echo "ERRO: grub-mkrescue nao encontrado (instale grub-pc-bin, xorriso e mtools)"; exit 1; }
+	@if [ -n "$(GRUB_FILE)" ]; then $(GRUB_FILE) --is-x86-multiboot $< || { echo "ERRO: header Multiboot invalido em $<"; exit 1; }; fi
+	rm -rf $(ISO_DIR)
+	mkdir -p $(ISO_DIR)/boot/grub
+	cp $(KERNEL_ELF) $(ISO_DIR)/boot/orion.elf
+	cp boot/grub/grub.cfg $(ISO_DIR)/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) > $(BUILD)/grub-mkrescue.log 2>&1 || { cat $(BUILD)/grub-mkrescue.log; exit 1; }
+	@echo "ISO (GRUB):  $@"
+
+# --- imagem de disquete (bootloader proprio) ---------------------------------
+# O stage2 recebe o tamanho e a entrada REAIS do kernel por -D: nada de
+# "64 setores" fixos nem de limite de 32 KiB.
+$(STAGE2_BIN): boot/stage2.asm boot/layout.inc $(KERNEL_BIN) $(KERNEL_ELF)
+	@mkdir -p $(BUILD)
+	$(NASM) -f bin -I boot/ \
+	  -DKERNEL_BYTES=$$(stat -c %s $(KERNEL_BIN)) \
+	  -DKERNEL_ENTRY=0x$$($(NM) $(KERNEL_ELF) | awk '$$3=="_start"{print $$1}') \
+	  $< -o $@
+	@test "$$(stat -c %s $@)" -eq 3072 || { echo "ERRO: stage2 deve ter 3072 bytes (STAGE2_SECTORS)"; exit 1; }
+
+$(STAGE1_BIN): boot/stage1.asm boot/layout.inc
+	@mkdir -p $(BUILD)
+	$(NASM) -f bin -I boot/ $< -o $@
+	@test "$$(stat -c %s $@)" -eq 512 || { echo "ERRO: stage1 deve ter 512 bytes"; exit 1; }
+
+$(IMG): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
+	cat $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) > $@
 	truncate -s 1474560 $@
-	@echo "Imagem original do Orion criada: $(IMAGE)"
-	@stat -c 'Tamanho: %s bytes' $@
+	@echo "Imagem (bootloader proprio): $@  (kernel: $$(stat -c %s $(KERNEL_BIN)) bytes)"
 
-# ============================================================
-# DISCO DE DADOS
-# ============================================================
-
-$(DATA_IMG): | $(BUILD)
+# --- disco de dados ----------------------------------------------------------
+$(DATA_IMG):
+	@mkdir -p $(BUILD)
 	dd if=/dev/zero of=$@ bs=1M count=1 2>/dev/null
 
-disk: $(DATA_IMG)
+# --- executar ----------------------------------------------------------------
+# BOOT=grub (padrao) ou BOOT=native:  make run BOOT=native
+BOOT ?= grub
 
-# ============================================================
-# SERVIDOR WEB
-# ============================================================
+run: $(DATA_IMG)
+ifeq ($(BOOT),native)
+	$(MAKE) --no-print-directory run-native
+else
+	$(MAKE) --no-print-directory run-grub
+endif
+
+run-grub: $(ISO) $(DATA_IMG)
+	$(QEMU) $(QEMU_FLAGS) -cdrom $(ISO) -boot d
+
+run-native: $(IMG) $(DATA_IMG)
+	$(QEMU) $(QEMU_FLAGS) -drive format=raw,file=$(IMG),if=floppy -boot a
+
+# --- testes automaticos (QEMU sem janela) ------------------------------------
+test: iso img $(DATA_IMG)
+	python3 tools/test_boot.py --qemu $(QEMU) --build $(BUILD)
+
+size: $(KERNEL_ELF)
+	@size $(KERNEL_ELF)
+	@echo "kernel.bin: $$(stat -c %s $(KERNEL_BIN) 2>/dev/null || echo '-') bytes"
 
 web:
+	@test -d web || { echo "pasta web/ nao existe neste projeto"; exit 1; }
 	cd web && node server.js
 
-# ============================================================
-# LINKAGEM DO KERNEL GRUB
-# ============================================================
-
-$(GRUB_KERNEL_ELF): $(GRUB_ENTRY_O) $(KERNEL_O) \
-                    $(TERMINAL_O) $(KEYBOARD_O) $(MOUSE_O) \
-                    $(LOG_O) $(ATA_O) $(FS_O) $(GFD_O) $(PCI_O) \
-                    $(USB_O) $(USB_CONTROLLER_O) $(USB_DEVICE_O) \
-                    kernel/grub.ld
-	$(CC) $(GRUB_LDFLAGS) -o $@ \
-		$(GRUB_ENTRY_O) $(KERNEL_O) $(TERMINAL_O) \
-		$(KEYBOARD_O) $(MOUSE_O) $(LOG_O) \
-		$(ATA_O) $(FS_O) $(GFD_O) $(PCI_O) \
-		$(USB_O) $(USB_CONTROLLER_O) $(USB_DEVICE_O)
-
-# ============================================================
-# ISO GRUB
-# ============================================================
-
-$(GRUB_ISO): $(GRUB_KERNEL_ELF) boot/iso-grub/boot/grub/grub.cfg
-	mkdir -p $(GRUB_ISO_DIR)/boot/grub
-	cp $(GRUB_KERNEL_ELF) $(GRUB_ISO_DIR)/boot/kernel-grub.elf
-	cp boot/iso-grub/boot/grub/grub.cfg $(GRUB_ISO_DIR)/boot/grub/grub.cfg
-	grub-mkrescue -o $@ $(GRUB_ISO_DIR)
-	@echo "ISO do Orion para GRUB criada: $@"
-
-grub: $(GRUB_ISO)
-
-# ============================================================
-# EXECUCAO NO QEMU
-# ============================================================
-
-run: $(IMAGE) $(DATA_IMG)
-	$(QEMU) -machine pc -m 128M \
-		-drive format=raw,file=$(IMAGE),if=floppy \
-		-drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
-		-boot a
-
-run-grub: $(GRUB_ISO) $(DATA_IMG)
-	$(QEMU) -machine pc -m 128M \
-		-cdrom $(GRUB_ISO) \
-		-drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
-		-boot d
-
-# ============================================================
-# DEPENDENCIAS AUTOMATICAS
-# ============================================================
-
--include $(wildcard $(BUILD)/*.d)
-
-# ============================================================
-# LIMPEZA E RECOMPILACAO
-# ============================================================
-
+# --- limpeza -----------------------------------------------------------------
 clean:
-	find $(BUILD) -mindepth 1 \
-		! -name orion-data.img \
-		! -name .gitkeep -delete
+	@if [ -d $(BUILD) ]; then find $(BUILD) -mindepth 1 ! -name orion-data.img ! -name .gitkeep -delete; fi
+
+distclean:
+	rm -rf $(BUILD)
 
 rebuild: clean
 	$(MAKE) all
+
+help:
+	@echo "Orion OS $(VERSION)"
+	@echo
+	@echo "  make            compila o kernel e gera a ISO (GRUB) e a imagem (bootloader proprio)"
+	@echo "  make iso        so a ISO do GRUB"
+	@echo "  make img        so a imagem do bootloader proprio"
+	@echo "  make run        abre no QEMU (BOOT=grub, padrao) -- ou: make run BOOT=native"
+	@echo "  make test       boot automatico das duas imagens + autoteste de memoria"
+	@echo "  make size       tamanho das secoes do kernel"
+	@echo "  make clean      apaga tudo em build/ menos o disco de dados"
+	@echo "  make distclean  apaga build/ inteiro (inclusive o disco de dados)"
+
+-include $(OBJS:.o=.d)

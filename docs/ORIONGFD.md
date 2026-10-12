@@ -5,7 +5,7 @@ de 32 bpp que o GRUB entrega via Multiboot (800x600 por padrao).
 
 ## Recursos (0.1.0)
 
-- Framebuffer com fonte bitmap 8x16 (ASCII, `include/gfd_font.h`).
+- Framebuffer com fonte bitmap 8x16 (ASCII, `gfx/gfd_font.h`).
 - Janelas com barra de titulo, botao de fechar, sombra, foco e ordem (z-order).
 - Mouse PS/2 por polling: cursor, clique, arrastar janelas.
 - Barra superior e barra de tarefas (clique abre, oculta ou traz a janela para frente).
@@ -16,23 +16,23 @@ de 32 bpp que o GRUB entrega via Multiboot (800x600 por padrao).
 
 | Arquivo | Funcao |
 | --- | --- |
-| `include/gfd.h` | API publica e hooks fracos |
-| `kernel/gfd.c` | framebuffer, desenho, janelas, mouse, console |
-| `include/gfd_font.h` | fonte 8x16 gerada de DejaVu Sans Mono |
+| `gfx/gfd.h` | API publica |
+| `gfx/gfd.c` | framebuffer, desenho, janelas, mouse, console |
+| `gfx/gfd_font.h` | fonte 8x16 gerada de DejaVu Sans Mono |
 
 ## Como integra
 
-- `boot/grub_entry.asm` chama `gfd_init(multiboot_info)` antes de `kernel_main`.
+- `kernel/main.c` chama `gfd_init(multiboot_info)`.
 - `terminal.c` desvia `terminal_putchar` / `terminal_clear` para o console do GFD.
 - `keyboard.c` repassa ao GFD os bytes do mouse (bit 5 do status da porta 0x64).
 - `kernel.c` chama `gfd_poll()` a cada volta do laco, que redesenha so se algo mudou.
-- Os hooks sao `weak`: o build do disquete (`make`), sem `gfd.o`, continua em modo texto.
+- O GFD e linkado sempre; sem framebuffer (bootloader proprio ou entrada texto do GRUB) `gfd_init` devolve 0 e o VGA de texto assume.
 
 ## Como testar
 
 ```sh
-make grub        # gera build/orion-grub.iso (precisa de grub-mkrescue e xorriso)
-make run-grub    # abre a ISO no QEMU
+make iso         # gera build/orion.iso
+make run         # abre a ISO no QEMU
 ```
 
 O teclado vai direto para o shell (nao ha foco de teclado por janela ainda).

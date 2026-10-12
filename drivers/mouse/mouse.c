@@ -26,7 +26,5 @@ if ((status & 1) == 0 || (status & 0x20) == 0) {
 return;
 }
 u8 data = inb(0x60);
-if (gfd_mouse_feed) {
 gfd_mouse_feed(data);
-}
 }

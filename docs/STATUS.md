@@ -1,8 +1,10 @@
 # Estado atual do Orion OS
 
-## Versão 0.4.0
+## Versão 0.5.0
 
 ### Funcionando
+- [x] Gerenciador de memória: PMM, heap (kmalloc/kfree), paginação com proteção.
+- [x] Exceções da CPU com tela de panic; boot único (GRUB e bootloader próprio via Multiboot).
 - [x] Bootloader em Assembly e segundo estágio.
 - [x] Modo protegido de 32 bits e kernel em C.
 - [x] Terminal interativo com teclado (polling) e comandos básicos.
@@ -10,8 +12,7 @@
 - [x] Orion Desktop: área de trabalho web com usuários, sem dependências.
 
 ### Em desenvolvimento
-- [ ] Tratamento de interrupções e temporizador.
-- [ ] Gerenciamento de memória.
+- [ ] Interrupções de hardware (IRQ/PIC) e temporizador (exceções já tratadas).
 - [ ] Teclado com Shift (maiúsculas e símbolos).
 - [ ] Migração para 64 bits.
 

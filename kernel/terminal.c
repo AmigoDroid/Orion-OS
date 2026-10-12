@@ -1,6 +1,8 @@
 
 #include "terminal.h"
 #include "gfd.h"
+#include "log.h"
+#include "io.h"
 
 typedef unsigned char  u8;
 typedef unsigned short u16;
@@ -13,16 +15,6 @@ static volatile u16 *const VGA_MEMORY = (volatile u16 *)0xB8000;
 static unsigned int terminal_row;
 static unsigned int terminal_column;
 static u8 terminal_color;
-
-static inline void outb(unsigned short port, unsigned char value)
-{
-    __asm__ volatile (
-        "outb %0, %1"
-        :
-        : "a"(value), "Nd"(port)
-    );
-}
-
 
 void terminal_update_cursor(void)
 {
@@ -44,7 +36,7 @@ static u16 make_vga_entry(char c, u8 color)
 
 void terminal_clear(void)
 {
-    if (gfd_console_clear && gfd_console_clear())
+    if (gfd_console_clear())
         return;
 
     u16 blank = make_vga_entry(' ', terminal_color);
@@ -80,7 +72,9 @@ static void terminal_scroll(void)
 
 void terminal_putchar(char c)
 {
-    if (gfd_console_putchar && gfd_console_putchar(c))
+    log_putc(c);                    /* espelho em 0xE9: transcript do boot */
+
+    if (gfd_console_putchar(c))
         return;
 
     if (c == '\n') {
@@ -127,6 +121,11 @@ void terminal_writestring(const char *str)
         terminal_putchar(*str);
         str++;
     }
+}
+
+void terminal_setcolor(unsigned char color)
+{
+    terminal_color = color;
 }
 
 void terminal_initialize(void)
