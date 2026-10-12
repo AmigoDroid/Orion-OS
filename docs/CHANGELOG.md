@@ -37,6 +37,7 @@
 - Boot normalizado: um kernel, um linker script, uma entrada. O bootloader proprio agora fala Multiboot (E820, A20, LBA). Ver `docs/BOOT.md`.
 - Makefile unico com descoberta automatica de fontes; `make test` (QEMU) cobre as duas formas de boot.
 - Pastas reorganizadas (`docs/STRUCTURE.md`); shell por tabela de comandos; `kprintf`; log espelha o terminal na porta 0xE9.
+- GFD com buffer duplo: a cena e montada na RAM e copiada inteira para a tela (acaba o piscar ao mover janelas/digitar). Sem memoria, cai no desenho direto.
 - GFD sempre linkado (hooks fracos removidos). Limite de 32 KiB do kernel removido.
 
 ## Anteriores nao lancados

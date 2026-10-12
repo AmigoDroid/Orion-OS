@@ -11,6 +11,8 @@
 #include "gfd_font.h"
 #include "multiboot.h"
 #include "version.h"
+#include "mm.h"
+#include "string.h"
 
 /* ------------------------------------------------------------------ */
 /* Constantes e estado                                                */
@@ -34,7 +36,9 @@ typedef struct {
     const char *title;
 } gfd_window_t;
 
-static volatile uint8_t *fb;
+static volatile uint8_t *fb;            /* a tela de verdade (framebuffer) */
+static uint8_t *back;                   /* copia na RAM; NULL = desenha direto */
+static volatile uint8_t *target;        /* onde as primitivas desenham agora */
 static int screen_w, screen_h;
 static uint32_t screen_pitch;
 static uint8_t shift_r, shift_g, shift_b;
@@ -95,7 +99,7 @@ static void init_palette(void)
 
 static inline volatile uint32_t *px_ptr(int x, int y)
 {
-    return (volatile uint32_t *)(fb + (uint32_t)y * screen_pitch +
+    return (volatile uint32_t *)(target + (uint32_t)y * screen_pitch +
                                  (uint32_t)x * 4u);
 }
 
@@ -675,7 +679,19 @@ void gfd_poll(void)
 
     if (scene_dirty) {
         cursor_hide();
-        draw_scene();
+        if (back) {
+            /* Monta o quadro inteiro na RAM e so depois o joga na tela:
+             * o monitor nunca ve o fundo "pela metade" (era o piscar). */
+            target = back;
+            draw_scene();
+            target = fb;
+            for (int y = 0; y < screen_h; y++)
+                memcpy((void *)(fb + (uint32_t)y * screen_pitch),
+                       back + (uint32_t)y * screen_pitch,
+                       (uint32_t)screen_w * 4u);
+        } else {
+            draw_scene();
+        }
         cursor_show();
     } else if (cursor_dirty) {
         cursor_hide();
@@ -684,6 +700,27 @@ void gfd_poll(void)
 
     scene_dirty = 0;
     cursor_dirty = 0;
+}
+
+int gfd_enable_backbuffer(void)
+{
+    uint32_t bytes, base;
+
+    if (!active)
+        return 0;
+    if (back)
+        return 1;
+
+    bytes = PAGE_ALIGN_UP(screen_pitch * (uint32_t)screen_h);
+    base = pmm_alloc_frames(bytes / PAGE_SIZE);
+    if (!base)
+        return 0;                       /* sem memoria: segue desenhando direto */
+
+    back = (uint8_t *)(uintptr_t)base;
+    memcpy(back, (const void *)fb, (size_t)screen_pitch * (size_t)screen_h);
+    scene_dirty = 1;
+    gfd_poll();
+    return 1;
 }
 
 int gfd_init(unsigned int multiboot_address)
@@ -713,6 +750,7 @@ int gfd_init(unsigned int multiboot_address)
         return 0;
 
     fb = (volatile uint8_t *)(uintptr_t)info->fb_addr_lo;
+    target = fb;
     screen_w = (int)info->fb_width;
     screen_h = (int)info->fb_height;
     screen_pitch = info->fb_pitch;

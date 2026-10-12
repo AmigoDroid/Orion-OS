@@ -53,6 +53,9 @@ void kernel_main(uint32_t magic, const mb_info_t *mbi)
     mm_init(mbi);
     vmm_init(mbi);
     kprintf(" Paginacao ligada (NULL, codigo e pilha protegidos).\n");
+    if (gfd_active())
+        kprintf(gfd_enable_backbuffer() ? " GFD: buffer duplo ativo.\n"
+                                        : " GFD: sem memoria para buffer duplo (a tela pode piscar).\n");
 
     /* 4. Dispositivos. */
     keyboard_initialize();

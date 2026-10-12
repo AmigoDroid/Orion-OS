@@ -12,6 +12,11 @@
 int  gfd_init(unsigned int multiboot_address);
 int  gfd_active(void);
 
+/* Liga o buffer duplo (cena montada na RAM, copiada inteira para a tela).
+ * Chamar DEPOIS de mm_init(). Devolve 1 se ligou; 0 se nao ha GFD ou
+ * memoria (nesse caso o GFD continua funcionando, so que piscando). */
+int  gfd_enable_backbuffer(void);
+
 /* Redesenha o que mudou. Chamar a cada volta do laco principal. */
 void gfd_poll(void);
 
