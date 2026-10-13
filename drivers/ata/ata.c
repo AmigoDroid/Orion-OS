@@ -19,6 +19,7 @@
 
 #define ATA_CMD_READ    0x20
 #define ATA_CMD_WRITE   0x30
+#define ATA_CMD_FLUSH   0xE7
 #define ATA_CMD_IDENTIFY 0xEC
 
 #define ATA_TIMEOUT 1000000
@@ -75,11 +76,25 @@ static int ata_wait(int require_drq)
     return -1;
 }
 
+static int present;
+static unsigned int total_sectors;
+static char model[41];
+
+int ata_present(void)            { return present; }
+unsigned int ata_sector_count(void) { return total_sectors; }
+const char *ata_model(void)      { return model; }
+
 int ata_initialize(void)
 {
+    unsigned short id[256];
     unsigned char status;
 
-    outb(ATA_DRIVE, 0xA0); /* Disco primário master. */
+    present = 0;
+    total_sectors = 0;
+    model[0] = '\0';
+
+    outb(ATA_CONTROL, 0x02);          /* nIEN: sem interrupcoes, so polling */
+    outb(ATA_DRIVE, 0xA0);            /* disco primario master */
     ata_delay();
 
     outb(ATA_SECCOUNT, 0);
@@ -87,35 +102,58 @@ int ata_initialize(void)
     outb(ATA_LBA1, 0);
     outb(ATA_LBA2, 0);
     outb(ATA_COMMAND, ATA_CMD_IDENTIFY);
+    ata_delay();
 
     status = inb(ATA_STATUS);
     if (status == 0 || status == 0xFF)
-        return -1;
+        return -1;                    /* nao ha disco */
 
     for (unsigned int i = 0; i < ATA_TIMEOUT; i++) {
         status = inb(ATA_STATUS);
 
-        if (status == 0 || status == 0xFF)
-            return -1;
-
-        if (status & ATA_ERR)
-            return -1;
+        if (status == 0xFF || (status & ATA_ERR))
+            return -1;                /* ATAPI/SATA: nao e um disco ATA simples */
 
         if (!(status & ATA_BSY) && (status & ATA_DRQ)) {
-            /* Lê os 256 words de identificação do dispositivo. */
             for (int j = 0; j < 256; j++)
-                (void)inw(ATA_DATA);
+                id[j] = inw(ATA_DATA);
 
-            return 0;
+            /* palavras 27-46: modelo, 2 caracteres por palavra, invertidos */
+            for (int j = 0; j < 20; j++) {
+                model[j * 2]     = (char)(id[27 + j] >> 8);
+                model[j * 2 + 1] = (char)(id[27 + j] & 0xFF);
+            }
+            model[40] = '\0';
+            for (int j = 39; j >= 0 && model[j] == ' '; j--)
+                model[j] = '\0';
+
+            /* palavras 60-61: total de setores LBA28 */
+            total_sectors = ((unsigned int)id[61] << 16) | id[60];
+            if (total_sectors > 0x0FFFFFFFu)
+                total_sectors = 0x0FFFFFFFu;
+
+            present = total_sectors != 0;
+            return present ? 0 : -1;
         }
     }
 
     return -1;
 }
 
+int ata_flush(void)
+{
+    if (!present)
+        return -1;
+
+    outb(ATA_DRIVE, 0xE0);
+    ata_delay();
+    outb(ATA_COMMAND, ATA_CMD_FLUSH);
+    return ata_wait(0);
+}
+
 int ata_read_sector(unsigned int lba, unsigned char *buffer)
 {
-    if (buffer == 0 || lba >= 0x10000000U)
+    if (buffer == 0 || lba >= 0x10000000U || (present && lba >= total_sectors))
         return -1;
 
     outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
@@ -142,7 +180,7 @@ int ata_read_sector(unsigned int lba, unsigned char *buffer)
 
 int ata_write_sector(unsigned int lba, const unsigned char *buffer)
 {
-    if (buffer == 0 || lba >= 0x10000000U)
+    if (buffer == 0 || lba >= 0x10000000U || (present && lba >= total_sectors))
         return -1;
 
     outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));

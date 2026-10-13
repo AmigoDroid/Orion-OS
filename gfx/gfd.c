@@ -8,8 +8,9 @@
 
 #include <stdint.h>
 #include "gfd.h"
-#include "gfd_font.h"
+#include "orion_font.h"
 #include "multiboot.h"
+#include "../locale/orionLeng.h"
 #include "version.h"
 #include "mm.h"
 #include "string.h"
@@ -139,39 +140,91 @@ static const unsigned char gfd_glyph_ccedilla[16] = {
 0x22, 0x1C, 0x08, 0x10,
 0x20, 0x00, 0x00, 0x00
 };
-static void draw_char(int x, int y, unsigned char ch,
-uint32_t fg, uint32_t bg, int opaque)
+static void draw_char(int x, int y, uint32_t codepoint,
+                      uint32_t fg, uint32_t bg, int opaque)
 {
-const unsigned char *g;
-if (ch == 0x80) {
-g = gfd_glyph_Ccedilla;
-} else if (ch == 0x87) {
-g = gfd_glyph_ccedilla;
-} else {
-if (ch < 32 || ch > 126)
-ch = ' ';
-g = gfd_font[ch - 32];
+    const uint8_t *g = orion_font_glyph(codepoint);
+
+    for (int r = 0; r < FONT_H; r++) {
+        unsigned char bits = g[r];
+
+        for (int c = 0; c < FONT_W; c++) {
+            if (bits & (0x80u >> c))
+                pixel(x + c, y + r, fg);
+            else if (opaque)
+                pixel(x + c, y + r, bg);
+        }
+    }
 }
-for (int r = 0; r < FONT_H; r++) {
-unsigned char bits = g[r];
-for (int c = 0; c < FONT_W; c++) {
-if (bits & (0x80u >> c))
-pixel(x + c, y + r, fg);
-else if (opaque)
-pixel(x + c, y + r, bg);
+
+/*
+ * Lê um ponto de código UTF-8. Em caso de sequência inválida,
+ * consome um byte e retorna '?' para não travar a renderização.
+ */
+static uint32_t utf8_next(const char **cursor)
+{
+    const unsigned char *s = (const unsigned char *)*cursor;
+    uint32_t cp;
+
+    if (s[0] < 0x80) {
+        *cursor = (const char *)(s + 1);
+        return s[0];
+    }
+
+    if (s[0] >= 0xC2 && s[0] <= 0xDF &&
+        (s[1] & 0xC0) == 0x80) {
+        cp = ((uint32_t)(s[0] & 0x1F) << 6) |
+             (uint32_t)(s[1] & 0x3F);
+        *cursor = (const char *)(s + 2);
+        return cp;
+    }
+
+    if (s[0] >= 0xE0 && s[0] <= 0xEF &&
+        (s[1] & 0xC0) == 0x80 &&
+        (s[2] & 0xC0) == 0x80 &&
+        !(s[0] == 0xE0 && s[1] < 0xA0) &&
+        !(s[0] == 0xED && s[1] >= 0xA0)) {
+        cp = ((uint32_t)(s[0] & 0x0F) << 12) |
+             ((uint32_t)(s[1] & 0x3F) << 6) |
+             (uint32_t)(s[2] & 0x3F);
+        *cursor = (const char *)(s + 3);
+        return cp;
+    }
+
+    if (s[0] >= 0xF0 && s[0] <= 0xF4 &&
+        (s[1] & 0xC0) == 0x80 &&
+        (s[2] & 0xC0) == 0x80 &&
+        (s[3] & 0xC0) == 0x80 &&
+        !(s[0] == 0xF0 && s[1] < 0x90) &&
+        !(s[0] == 0xF4 && s[1] > 0x8F)) {
+        cp = ((uint32_t)(s[0] & 0x07) << 18) |
+             ((uint32_t)(s[1] & 0x3F) << 12) |
+             ((uint32_t)(s[2] & 0x3F) << 6) |
+             (uint32_t)(s[3] & 0x3F);
+        *cursor = (const char *)(s + 4);
+        return cp;
+    }
+
+    *cursor = (const char *)(s + 1);
+    return '?';
 }
-}
-}
+
 static void draw_text(int x, int y, const char *s, uint32_t fg)
 {
-    for (; *s; s++, x += FONT_W)
-        draw_char(x, y, *s, fg, 0, 0);
+    while (*s) {
+        uint32_t cp = utf8_next(&s);
+        draw_char(x, y, cp, fg, 0, 0);
+        x += FONT_W;
+    }
 }
 
 static int text_len(const char *s)
 {
     int n = 0;
-    while (s[n]) n++;
+    while (*s) {
+        (void)utf8_next(&s);
+        n++;
+    }
     return n;
 }
 
@@ -406,8 +459,8 @@ static void draw_about(const gfd_window_t *w)
     char *p;
     int x = w->x + 14, y = w->y + TITLE_H + 12;
 
-    draw_text(x, y,        "OrionGFD 0.1.0", c_accent);
-    draw_text(x, y + 20,   "Interface grafica do Orion OS", c_white);
+    draw_text(x, y,        orionLeng_get("ui.version"), c_accent);
+    draw_text(x, y + 20,   orionLeng_get("ui.interface"), c_white);
 
     p = append(line, "Tela: ");
     p = append_uint(p, (uint32_t)screen_w);
@@ -417,11 +470,11 @@ static void draw_about(const gfd_window_t *w)
     *p = '\0';
     draw_text(x, y + 52, line, c_muted);
 
-    draw_text(x, y + 72, mouse_ok ? "Mouse: ativo" : "Mouse: nao detectado",
+    draw_text(x, y + 72, mouse_ok ? orionLeng_get("ui.mouse_active") : orionLeng_get("ui.mouse_missing"),
               c_muted);
-    draw_text(x, y + 100, "Arraste a barra de titulo para", c_muted);
-    draw_text(x, y + 118, "mover. A barra inferior abre e", c_muted);
-    draw_text(x, y + 136, "oculta as janelas.", c_muted);
+    draw_text(x, y + 100, orionLeng_get("ui.drag_hint1"), c_muted);
+    draw_text(x, y + 118, orionLeng_get("ui.drag_hint2"), c_muted);
+    draw_text(x, y + 136, orionLeng_get("ui.drag_hint3"), c_muted);
 }
 
 static void draw_window(int idx, int focused)

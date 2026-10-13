@@ -14,8 +14,8 @@ align 4
 
     ; Solicita modo gráfico 800x600, 32 bits
     dd 0
-    dd 800
-    dd 600
+    dd 1280
+    dd 720
     dd 32
 
 section .text.entry

@@ -1,5 +1,5 @@
 #include "mouse.h"
-#include "gfd.h"
+#include "../../gfx/gfd.h"
 
 typedef unsigned char u8;
 static inline u8 inb(unsigned short port)

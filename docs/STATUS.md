@@ -1,8 +1,9 @@
 # Estado atual do Orion OS
 
-## Versão 0.5.0
+## Versão 0.6.0
 
 ### Funcionando
+- [x] OrionFS v3: pastas, arquivos até ~8 MiB, permissões, datas, fsck.
 - [x] Gerenciador de memória: PMM, heap (kmalloc/kfree), paginação com proteção.
 - [x] Exceções da CPU com tela de panic; boot único (GRUB e bootloader próprio via Multiboot).
 - [x] Bootloader em Assembly e segundo estágio.

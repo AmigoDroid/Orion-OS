@@ -1,6 +1,6 @@
 # Orion OS
 
-**Versao:** 0.5.0  
+**Versao:** 0.6.0  
 **Estado:** Desenvolvimento experimental  
 **Arquitetura atual:** x86 de 32 bits (i386)
 
@@ -29,8 +29,8 @@ make test       # boot automatico das duas imagens + autoteste de memoria
 make help       # todos os alvos
 ```
 
-Comandos do Orion: `help`, `info`, `clear`, `ls`, `format`, `create`, `write`, `read`, `rm`, `mem`, `memmap`, `vmm`, `heapcheck`, `memtest`, `crash`, `reboot`, `halt`.
-Docs: `BOOT.md`, `MEMORY.md`, `STRUCTURE.md`.
+Comandos do Orion: `help`, `info`, `clear`, `ls`, `cd`, `pwd`, `mkdir`, `rmdir`, `touch`, `write`, `append`, `cat`, `rm`, `cp`, `mv`, `stat`, `chmod`, `tree`, `df`, `fsck`, `sync`, `format`, `fstest`, `mem`, `memmap`, `vmm`, `heapcheck`, `memtest`, `crash`, `reboot`, `halt`.
+Docs: `BOOT.md`, `MEMORY.md`, `ORIONFS.md`, `STRUCTURE.md`.
 Na primeira vez, rode `format`.
 
 ## Orion Desktop (area de trabalho web)

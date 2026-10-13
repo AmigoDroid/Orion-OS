@@ -1,0 +1,663 @@
+/* Shell do Orion: le o teclado (polling), interpreta e executa comandos.
+ * Cada comando e uma linha da tabela `commands`; para criar um novo,
+ * escreva a funcao cmd_xxx e acrescente uma linha. */
+
+#include "shell.h"
+#include "kprintf.h"
+#include "terminal.h"
+#include "string.h"
+#include "version.h"
+#include "io.h"
+#include "panic.h"
+#include "mm.h"
+#include "fs.h"
+#include "ata.h"
+#include "rtc.h"
+#include "gfd.h"
+#include "pci.h"
+#include "usb.h"
+#include "keyboard.h"
+#include "mouse.h"
+
+#define INPUT_SIZE 256
+
+static const mb_info_t *boot_info;
+
+static char *skip_spaces(char *s)
+{
+    while (*s == ' ')
+        s++;
+    return s;
+}
+
+/* ---------------------------- comandos basicos ---------------------------- */
+
+static void cmd_help(char *args);
+
+static void cmd_clear(char *args)   { (void)args; terminal_initialize(); }
+static void cmd_pci(char *args)     { (void)args; pci_list_devices(); }
+static void cmd_usb(char *args)     { (void)args; usb_list_controllers(); }
+
+static void cmd_info(char *args)
+{
+    (void)args;
+    kprintf("Orion OS %s (i386, Multiboot)\n", ORION_VERSION);
+    if (boot_info->flags & MB_FLAG_LOADER_NAME)
+        kprintf("  bootloader: %s\n", (const char *)(uintptr_t)boot_info->boot_loader_name);
+    kprintf("  video: %s\n", gfd_active() ? "OrionGFD (framebuffer)" : "texto VGA 80x25");
+    kprintf("  paginacao: %s\n", vmm_enabled() ? "ligada" : "desligada");
+}
+
+static void cmd_reboot(char *args)
+{
+    (void)args;
+    fs_sync();
+    kprintf("Reiniciando...\n");
+    for (int i = 0; i < 100000 && (inb(0x64) & 2); i++) { }
+    outb(0x64, 0xFE);                       /* pulso de reset do controlador PS/2 */
+    cpu_halt_forever();
+}
+
+static void cmd_halt(char *args)
+{
+    (void)args;
+    fs_sync();
+    kprintf("Sistema parado.\n");
+    gfd_poll();
+    cpu_halt_forever();
+}
+
+/* ---------------------------- arquivos (OrionFS) ---------------------------- */
+
+static char *next_token(char **s)
+{
+    char *t = skip_spaces(*s), *e = t;
+
+    if (*t == '\0') {
+        *s = t;
+        return NULL;
+    }
+    while (*e && *e != ' ')
+        e++;
+    if (*e)
+        *e++ = '\0';
+    *s = skip_spaces(e);
+    return t;
+}
+
+static void fs_fail(const char *cmd, const char *arg, int err)
+{
+    kprintf("%s: %s%s%s\n", cmd, arg ? arg : "", arg ? ": " : "", fs_strerror(err));
+}
+
+static void mode_string(const fs_stat_t *st, char *out)   /* out: 11 bytes */
+{
+    uint16_t o = (st->mode >> 6) & 7, t = st->mode & 7;
+
+    out[0] = st->type == FS_TYPE_DIR ? 'd' : '-';
+    out[1] = o & 4 ? 'r' : '-';  out[2] = o & 2 ? 'w' : '-';  out[3] = o & 1 ? 'x' : '-';
+    /* O OrionFS so guarda "dono" e "outros"; o grupo mostra o mesmo que "outros". */
+    out[4] = t & 4 ? 'r' : '-';  out[5] = t & 2 ? 'w' : '-';  out[6] = t & 1 ? 'x' : '-';
+    out[7] = out[4];  out[8] = out[5];  out[9] = out[6];
+    out[10] = '\0';
+}
+
+static void print_entry(const fs_stat_t *st, const char *name, int longfmt)
+{
+    if (longfmt) {
+        char m[11], when[17];
+
+        mode_string(st, m);
+        rtc_format(st->mtime, when);
+        kprintf("  %s %3u %8u  %-16s  %s%s\n", m, st->uid, st->size, when, name,
+                st->type == FS_TYPE_DIR ? "/" : "");
+    } else {
+        kprintf("  %s%s\n", name, st->type == FS_TYPE_DIR ? "/" : "");
+    }
+}
+
+static void cmd_ls(char *args)
+{
+    int longfmt = 0;
+    char *tok, *path = ".";
+    fs_stat_t st;
+    fs_dirent_t e;
+    uint32_t cursor = 0, files = 0, dirs = 0;
+    int r;
+
+    while ((tok = next_token(&args))) {
+        if (strcmp(tok, "-l") == 0)
+            longfmt = 1;
+        else
+            path = tok;
+    }
+
+    r = fs_stat(path, &st);
+    if (r != FS_OK) { fs_fail("ls", path, r); return; }
+    if (st.type == FS_TYPE_FILE) {
+        print_entry(&st, path, longfmt);
+        return;
+    }
+
+    while ((r = fs_readdir(path, &cursor, &e)) == 1) {
+        char full[FS_PATH_MAX];
+        fs_stat_t es;
+
+        if (longfmt) {
+            ksnprintf(full, sizeof(full), "%s/%s", path, e.name);
+            if (fs_stat(full, &es) != FS_OK)
+                continue;
+        } else {
+            es.type = e.type;
+        }
+        print_entry(&es, e.name, longfmt);
+        if (e.type == FS_TYPE_DIR) dirs++; else files++;
+    }
+    if (r < 0) { fs_fail("ls", path, r); return; }
+    if (files + dirs == 0)
+        kprintf("  (vazio)\n");
+    else
+        kprintf("  %u arquivo(s), %u pasta(s)\n", files, dirs);
+}
+
+static void cmd_cd(char *args)
+{
+    char *p = next_token(&args);
+    int r = fs_chdir(p ? p : "/");
+
+    if (r != FS_OK)
+        fs_fail("cd", p, r);
+}
+
+static void cmd_pwd(char *args)
+{
+    char b[FS_PATH_MAX];
+    int r = fs_getcwd(b, sizeof(b));
+
+    (void)args;
+    if (r == FS_OK) kprintf("%s\n", b); else fs_fail("pwd", NULL, r);
+}
+
+static void cmd_mkdir(char *args)
+{
+    char *p;
+    int any = 0;
+
+    while ((p = next_token(&args))) {
+        int r = fs_mkdir(p);
+        any = 1;
+        if (r != FS_OK) fs_fail("mkdir", p, r);
+    }
+    if (!any) kprintf("Uso: mkdir <pasta> [...]\n");
+}
+
+static void cmd_rmdir(char *args)
+{
+    char *p;
+    int any = 0;
+
+    while ((p = next_token(&args))) {
+        int r = fs_rmdir(p);
+        any = 1;
+        if (r != FS_OK) fs_fail("rmdir", p, r);
+    }
+    if (!any) kprintf("Uso: rmdir <pasta> [...]   (so pastas vazias; use rm -r)\n");
+}
+
+static void cmd_touch(char *args)
+{
+    char *p;
+    int any = 0;
+
+    while ((p = next_token(&args))) {
+        int r = fs_create(p);
+        any = 1;
+        if (r != FS_OK && r != FS_ERR_EXIST) fs_fail("touch", p, r);
+    }
+    if (!any) kprintf("Uso: touch <arquivo> [...]\n");
+}
+
+static void write_common(const char *cmd, char *args, int append)
+{
+    char *path = next_token(&args);
+    int r;
+
+    if (!path || !*args) { kprintf("Uso: %s <arquivo> <texto>\n", cmd); return; }
+    r = fs_write_file(path, args, (uint32_t)strlen(args), append);
+    if (r != FS_OK) fs_fail(cmd, path, r);
+}
+
+static void cmd_write(char *args)  { write_common("write", args, 0); }
+static void cmd_append(char *args) { write_common("append", args, 1); }
+
+#define CAT_LIMIT 65536u
+
+static void cmd_cat(char *args)
+{
+    char *p = next_token(&args);
+    uint8_t buf[512];
+    uint32_t total = 0, last = '\n';
+    int fd, n;
+
+    if (!p) { kprintf("Uso: cat <arquivo>\n"); return; }
+    fd = fs_open(p, FS_O_READ);
+    if (fd < 0) { fs_fail("cat", p, fd); return; }
+
+    while ((n = fs_read(fd, buf, sizeof(buf))) > 0) {
+        for (int i = 0; i < n; i++) {
+            uint8_t c = buf[i];
+
+            if (c == '\n' || c == '\t' || (c >= 32 && c < 127) || c >= 160)
+                terminal_putchar((char)c);
+            else
+                terminal_putchar('.');               /* byte de controle: nao bagunca a tela */
+            last = c;
+        }
+        total += (uint32_t)n;
+        if (total >= CAT_LIMIT) {
+            kprintf("\n[... truncado em %u bytes ...]", CAT_LIMIT);
+            last = 0;
+            break;
+        }
+    }
+    if (n < 0) fs_fail("cat", p, n);
+    if (last != '\n')
+        terminal_putchar('\n');
+    fs_close(fd);
+}
+
+static void cmd_rm(char *args)
+{
+    int recursive = 0, any = 0;
+    char *p;
+
+    while ((p = next_token(&args))) {
+        int r;
+
+        if (strcmp(p, "-r") == 0 || strcmp(p, "-rf") == 0) { recursive = 1; continue; }
+        any = 1;
+        r = recursive ? fs_rmtree(p) : fs_unlink(p);
+        if (r != FS_OK)
+            fs_fail("rm", p, r == FS_ERR_ISDIR ? r : r);
+    }
+    if (!any) kprintf("Uso: rm [-r] <arquivo|pasta> [...]\n");
+}
+
+/* Se `dest` e uma pasta existente, o destino real e dest/nome-de-src. */
+static void into_dir(const char *src, const char *dest, char *out)
+{
+    fs_stat_t st;
+    uint32_t n = (uint32_t)strlen(src);
+    const char *base = src;
+
+    while (n > 1 && src[n - 1] == '/')
+        n--;
+    for (uint32_t i = 0; i < n; i++) {
+        if (src[i] == '/')
+            base = src + i + 1;
+    }
+
+    if (fs_stat(dest, &st) == FS_OK && st.type == FS_TYPE_DIR) {
+        uint32_t len = (uint32_t)strlen(dest);
+
+        ksnprintf(out, FS_PATH_MAX, "%s%s%.*s", dest,
+                  len && dest[len - 1] == '/' ? "" : "/",
+                  (int)(src + n - base), base);
+    } else {
+        ksnprintf(out, FS_PATH_MAX, "%s", dest);
+    }
+}
+
+static void cmd_cp(char *args)
+{
+    int recursive = 0;
+    char *a = NULL, *b = NULL, *p;
+
+    while ((p = next_token(&args))) {
+        if (strcmp(p, "-r") == 0) recursive = 1;
+        else if (!a) a = p;
+        else if (!b) b = p;
+    }
+    if (!a || !b) { kprintf("Uso: cp [-r] <origem> <destino>\n"); return; }
+    {
+        int r = fs_copy(a, b, recursive);
+        if (r != FS_OK) fs_fail("cp", a, r);
+    }
+}
+
+static void cmd_mv(char *args)
+{
+    char *a = next_token(&args), *b = next_token(&args), dest[FS_PATH_MAX];
+    int r;
+
+    if (!a || !b) { kprintf("Uso: mv <origem> <destino>\n"); return; }
+    into_dir(a, b, dest);
+    r = fs_rename(a, dest);
+    if (r != FS_OK) fs_fail("mv", a, r);
+}
+
+static void cmd_stat(char *args)
+{
+    char *p = next_token(&args), m[11], t1[17], t2[17];
+    fs_stat_t st;
+    int r;
+
+    if (!p) { kprintf("Uso: stat <caminho>\n"); return; }
+    r = fs_stat(p, &st);
+    if (r != FS_OK) { fs_fail("stat", p, r); return; }
+
+    mode_string(&st, m);
+    rtc_format(st.ctime, t1);
+    rtc_format(st.mtime, t2);
+    kprintf("  %s  (%s)\n", p, st.type == FS_TYPE_DIR ? "pasta" : "arquivo");
+    kprintf("  inode %u   links %u   dono uid %u   permissoes %s (%o)\n",
+            st.ino, st.nlink, st.uid, m, st.mode);
+    kprintf("  tamanho %u bytes   blocos de 512 B: %u\n", st.size, st.blocks);
+    kprintf("  criado   %s UTC\n  alterado %s UTC\n", t1, t2);
+}
+
+static void cmd_chmod(char *args)
+{
+    char *m = next_token(&args), *p = next_token(&args);
+    uint16_t mode = 0;
+    int r;
+
+    if (!m || !p) { kprintf("Uso: chmod <octal, ex. 644> <caminho>\n"); return; }
+    for (const char *c = m; *c; c++) {
+        if (*c < '0' || *c > '7') { kprintf("chmod: modo invalido (use octal, ex. 644)\n"); return; }
+        mode = (uint16_t)(mode * 8 + (*c - '0'));
+    }
+    r = fs_chmod(p, mode);
+    if (r != FS_OK) fs_fail("chmod", p, r);
+}
+
+static void tree_walk(char *path, int depth, uint32_t *files, uint32_t *dirs)
+{
+    fs_dirent_t e;
+    uint32_t cursor = 0, plen = (uint32_t)strlen(path);
+
+    while (fs_readdir(path, &cursor, &e) == 1) {
+        for (int i = 0; i < depth; i++)
+            kprintf("  ");
+        kprintf("%s%s\n", e.name, e.type == FS_TYPE_DIR ? "/" : "");
+
+        if (e.type != FS_TYPE_DIR) {
+            (*files)++;
+            continue;
+        }
+        (*dirs)++;
+        if (depth < 12 && plen + 1 + strlen(e.name) < FS_PATH_MAX) {
+            ksnprintf(path + plen, FS_PATH_MAX - plen, "%s%s",
+                      plen > 1 ? "/" : "", e.name);
+            tree_walk(path, depth + 1, files, dirs);
+            path[plen] = '\0';
+        }
+    }
+}
+
+static void cmd_tree(char *args)
+{
+    char path[FS_PATH_MAX], *p = next_token(&args);
+    fs_stat_t st;
+    uint32_t files = 0, dirs = 0;
+    int r;
+
+    ksnprintf(path, sizeof(path), "%s", p ? p : ".");
+    r = fs_stat(path, &st);
+    if (r != FS_OK) { fs_fail("tree", path, r); return; }
+    kprintf("%s\n", path);
+    tree_walk(path, 1, &files, &dirs);
+    kprintf("\n%u pasta(s), %u arquivo(s)\n", dirs, files);
+}
+
+static void cmd_df(char *args)
+{
+    fs_statfs_t s;
+    int r = fs_statfs(&s);
+
+    (void)args;
+    if (r != FS_OK) { fs_fail("df", NULL, r); return; }
+    kprintf("Disco: %s, %u KiB\n", ata_model(), ata_sector_count() / 2);
+    kprintf("OrionFS v3 (blocos de %u B)\n", s.block_size);
+    kprintf("  espaco   total %8u KiB   usado %8u KiB   livre %8u KiB\n",
+            s.total_blocks / 2, (s.total_blocks - s.free_blocks) / 2, s.free_blocks / 2);
+    kprintf("  inodes   total %8u       usado %8u       livre %8u\n",
+            s.total_inodes, s.total_inodes - s.free_inodes, s.free_inodes);
+    kprintf("  cache de blocos: %u acertos, %u leituras no disco\n",
+            s.cache_hits, s.cache_misses);
+}
+
+static void cmd_fsck(char *args)
+{
+    int repair = strcmp(args, "repair") == 0;
+    int r = fs_fsck(repair, 1);
+
+    if (r < 0)
+        fs_fail("fsck", NULL, r);
+    else if (r == 0)
+        kprintf("Volume consistente.\n");
+    else
+        kprintf("%d problema(s) restante(s). %s\n", r,
+                repair ? "Esses precisam de ajuda manual." : "Rode: fsck repair");
+}
+
+static void cmd_sync(char *args)
+{
+    int r = fs_sync();
+
+    (void)args;
+    if (r != FS_OK) fs_fail("sync", NULL, r); else kprintf("Dados gravados no disco.\n");
+}
+
+static void cmd_format(char *args)
+{
+    int r;
+
+    if (strcmp(args, "sim") != 0) {
+        kprintf("ATENCAO: format APAGA TUDO no disco ATA (%s, %u KiB).\n",
+                ata_present() || ata_initialize() == 0 ? ata_model() : "nao encontrado",
+                ata_sector_count() / 2);
+        kprintf("Se tiver certeza, digite: format sim\n");
+        return;
+    }
+    kprintf("Formatando o OrionFS v3...\n");
+    r = fs_format();
+    if (r != FS_OK) fs_fail("format", NULL, r); else kprintf("OrionFS formatado.\n");
+}
+
+static void cmd_fstest(char *args) { (void)args; fs_selftest(); }
+
+/* ---------------------------- memoria ---------------------------- */
+
+static void cmd_mem(char *args)     { (void)args; mm_print_info(); }
+static void cmd_memmap(char *args)  { (void)args; mm_print_map(); }
+static void cmd_vmm(char *args)     { (void)args; vmm_print_info(); }
+static void cmd_memtest(char *args) { (void)args; mm_selftest(); }
+
+static void cmd_heapcheck(char *args)
+{
+    int deep = strcmp(args, "deep") == 0;
+    int errors = heap_check(deep, 1);
+
+    errors += pmm_check();
+    if (errors)
+        kprintf("Heap/PMM: %d problema(s) encontrado(s).\n", errors);
+    else
+        kprintf("Heap/PMM consistentes%s.\n", deep ? " (verificacao profunda)" : "");
+}
+
+/* ---------------------------- provocar falhas (teste) ---------------------------- */
+
+static int __attribute__((noinline)) recurse(int n)
+{
+    volatile char pad[512];
+
+    pad[0] = (char)n;
+    __asm__ volatile ("" ::: "memory");
+    return recurse(n + 1) + pad[0];
+}
+
+static void cmd_crash(char *args)
+{
+    if (strcmp(args, "null") == 0) {
+        *(volatile int *)0 = 1;
+    } else if (strcmp(args, "read") == 0) {
+        volatile int x = *(volatile int *)0;
+        (void)x;
+    } else if (strcmp(args, "text") == 0) {
+        *(volatile uint8_t *)(uintptr_t)shell_run = 0;      /* escreve no codigo */
+    } else if (strcmp(args, "stack") == 0) {
+        recurse(0);
+    } else if (strcmp(args, "div") == 0) {
+        /* em C o GCC apagaria 1/0 (comportamento indefinido): usa a instrucao */
+        __asm__ volatile ("xor %%edx, %%edx\n\tdiv %%ecx" : : "a"(1), "c"(0) : "edx");
+    } else if (strcmp(args, "ud") == 0) {
+        __asm__ volatile ("ud2");
+    } else if (strcmp(args, "bp") == 0) {
+        __asm__ volatile ("int3");                          /* recuperavel */
+    } else if (strcmp(args, "heap") == 0) {
+        char *p = kmalloc(16);
+        p[16] = 0;                                          /* 1 byte alem */
+        kfree(p);
+    } else if (strcmp(args, "free2") == 0) {
+        void *p = kmalloc(16);
+        kfree(p);
+        kfree(p);
+    } else if (strcmp(args, "panic") == 0) {
+        panic("panic de teste pedido pelo usuario");
+    } else {
+        kprintf("Uso: crash <null|read|text|stack|div|ud|bp|heap|free2|panic>\n"
+                "Provoca de proposito uma falha para testar o tratamento de erros.\n");
+    }
+}
+
+/* ---------------------------- tabela ---------------------------- */
+
+typedef struct {
+    const char *name;
+    const char *usage;
+    const char *help;
+    void (*run)(char *args);
+} command_t;
+
+static const command_t commands[] = {
+    { "help",      "",                 "Mostra esta ajuda",              cmd_help },
+    { "info",      "",                 "Versao, bootloader e video",     cmd_info },
+    { "clear",     "",                 "Limpa a tela",                   cmd_clear },
+    { "pci",       "",                 "Lista dispositivos PCI",         cmd_pci },
+    { "usb",       "",                 "Controladores USB",              cmd_usb },
+    /* arquivos */
+    { "ls",        "[-l] [pasta]",     "Lista arquivos e pastas",        cmd_ls },
+    { "cd",        "[pasta]",          "Muda de pasta",                  cmd_cd },
+    { "pwd",       "",                 "Mostra a pasta atual",           cmd_pwd },
+    { "mkdir",     "<pasta>",          "Cria pastas",                    cmd_mkdir },
+    { "rmdir",     "<pasta>",          "Remove pastas vazias",           cmd_rmdir },
+    { "touch",     "<arquivo>",        "Cria arquivo vazio",             cmd_touch },
+    { "create",    "<arquivo>",        "Igual a touch",                  cmd_touch },
+    { "write",     "<arq> <texto>",    "Grava texto (substitui)",        cmd_write },
+    { "append",    "<arq> <texto>",    "Acrescenta texto no fim",        cmd_append },
+    { "cat",       "<arquivo>",        "Mostra o conteudo",              cmd_cat },
+    { "read",      "<arquivo>",        "Igual a cat",                    cmd_cat },
+    { "rm",        "[-r] <caminho>",   "Remove arquivo (-r: pasta)",     cmd_rm },
+    { "cp",        "[-r] <de> <para>", "Copia arquivo ou pasta (-r)",    cmd_cp },
+    { "mv",        "<de> <para>",      "Move ou renomeia",               cmd_mv },
+    { "stat",      "<caminho>",        "Detalhes de um arquivo/pasta",   cmd_stat },
+    { "chmod",     "<octal> <caminho>","Muda permissoes",                cmd_chmod },
+    { "tree",      "[pasta]",          "Mostra a arvore de pastas",      cmd_tree },
+    { "df",        "",                 "Espaco do disco e do cache",     cmd_df },
+    { "fsck",      "[repair]",         "Verifica (e conserta) o disco",  cmd_fsck },
+    { "sync",      "",                 "Grava tudo no disco",            cmd_sync },
+    { "format",    "[sim]",            "Formata o disco (APAGA tudo)",   cmd_format },
+    { "fstest",    "",                 "Autoteste do sistema de arquivos", cmd_fstest },
+    /* memoria */
+    { "mem",       "",                 "Uso de memoria (PMM e heap)",    cmd_mem },
+    { "memmap",    "",                 "Mapa de memoria do firmware",    cmd_memmap },
+    { "vmm",       "",                 "Estado da paginacao",            cmd_vmm },
+    { "heapcheck", "[deep]",           "Verifica a integridade",         cmd_heapcheck },
+    { "memtest",   "",                 "Autoteste do gerenciador",       cmd_memtest },
+    { "crash",     "<tipo>",           "Provoca uma falha (teste)",      cmd_crash },
+    { "reboot",    "",                 "Reinicia a maquina",             cmd_reboot },
+    { "halt",      "",                 "Para a CPU",                     cmd_halt },
+};
+
+#define NCOMMANDS ((int)(sizeof(commands) / sizeof(commands[0])))
+
+static void cmd_help(char *args)
+{
+    (void)args;
+    kprintf("\nComandos do Orion OS:\n\n");
+    for (int i = 0; i < NCOMMANDS; i++)
+        kprintf("  %-9s %-17s %s\n", commands[i].name, commands[i].usage, commands[i].help);
+    kprintf("\n");
+}
+
+static void execute(char *line)
+{
+    char *name = skip_spaces(line), *args = name;
+
+    if (*name == '\0')
+        return;
+
+    while (*args && *args != ' ')
+        args++;
+    if (*args) {
+        *args++ = '\0';
+        args = skip_spaces(args);
+    }
+
+    for (int i = 0; i < NCOMMANDS; i++) {
+        if (strcmp(name, commands[i].name) == 0) {
+            commands[i].run(args);
+            return;
+        }
+    }
+    kprintf(" Comando desconhecido: %s\nDigite 'help' para ver os comandos.\n", name);
+}
+
+static void prompt(void)
+{
+    char cwd[FS_PATH_MAX];
+
+    if (fs_getcwd(cwd, sizeof(cwd)) != FS_OK) {
+        cwd[0] = '/';
+        cwd[1] = '\0';
+    }
+    kprintf(" orion:%s> ", cwd);
+}
+
+void shell_run(const mb_info_t *mbi)
+{
+    static char input[INPUT_SIZE];
+    unsigned int length = 0;
+
+    boot_info = mbi;
+    kprintf("Digite 'help' para ver os comandos.\n\n");
+    prompt();
+
+    /* Sem IRQs (cli) o teclado e lido por polling; nao use hlt aqui. */
+    for (;;) {
+        int c;
+
+        gfd_poll();
+        mouse_poll();
+        c = keyboard_getchar();
+        if (c < 0)
+            continue;
+
+        if (c == '\n') {
+            terminal_putchar('\n');
+            input[length] = '\0';
+            execute(input);
+            length = 0;
+            prompt();
+        } else if (c == '\b') {
+            if (length > 0) {
+                length--;
+                terminal_putchar('\b');
+            }
+        } else if (length < INPUT_SIZE - 1) {
+            input[length++] = (char)c;
+            terminal_putchar((char)c);
+        }
+    }
+}

@@ -9,14 +9,17 @@
 #include "log.h"
 #include "gdt.h"
 #include "idt.h"
-#include "gfd.h"
+#include "../gfx/gfd.h"
 #include "mm.h"
 #include "fs.h"
+#include "ata.h"
 #include "pci.h"
 #include "usb.h"
 #include "keyboard.h"
 #include "mouse.h"
 #include "shell.h"
+#include "display.h"
+#include "../locale/orionLeng.h"
 
 static void banner(void)
 {
@@ -47,7 +50,12 @@ void kernel_main(uint32_t magic, const mb_info_t *mbi)
     /* 2. Video: GFD se houver framebuffer, senao texto VGA. */
     gfd_init((unsigned int)(uintptr_t)mbi);
     terminal_initialize();
+    (void)orionLeng_init();
     banner();
+    kprintf(" orionLeng: idioma ativo = %s\n", orionLeng_current_code());
+    kprintf(" orionLeng: teste = %s\n", orionLeng_get("system.welcome"));
+    /* Diagnostico do Orion Display Manager. */
+    display_report(mbi);
 
     /* 3. Memoria: frames fisicos, heap e depois paginacao. */
     mm_init(mbi);
@@ -64,8 +72,27 @@ void kernel_main(uint32_t magic, const mb_info_t *mbi)
     usb_initialize();
     kprintf(" Teclado e mouse inicializados.\n");
 
-    kprintf(" Inicializando OrionFS...\n\n");
-    fs_mount();
+    kprintf(" Disco: ");
+    if (ata_initialize() == 0) {
+        int r = fs_mount();
+
+        kprintf("%s (%u KiB)\n", ata_model(), ata_sector_count() / 2);
+        if (r == FS_OK) {
+            fs_statfs_t st;
+
+            fs_statfs(&st);
+            kprintf(" OrionFS v3 montado (%u KiB livres).\n", st.free_blocks / 2);
+            if (st.was_dirty)
+                kprintf(" AVISO: o volume nao foi desmontado direito. Rode: fsck repair\n");
+        } else if (r == FS_ERR_NOTFS) {
+            kprintf(" Disco sem OrionFS v3 (discos v2 nao sao lidos). Use: format sim\n");
+        } else {
+            kprintf(" Nao foi possivel montar o OrionFS: %s\n", fs_strerror(r));
+        }
+    } else {
+        kprintf("nenhum disco ATA encontrado.\n");
+    }
+    kprintf("\n");
 
     log_ok("kernel pronto");
     shell_run(mbi);

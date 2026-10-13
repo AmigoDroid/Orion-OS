@@ -1,7 +1,7 @@
 #include "panic.h"
 #include "kprintf.h"
 #include "terminal.h"
-#include "gfd.h"
+#include "../gfx/gfd.h"
 #include "io.h"
 #include "log.h"
 

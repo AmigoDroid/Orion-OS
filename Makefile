@@ -27,7 +27,7 @@ GRUB_FILE     := $(firstword $(shell command -v grub-file grub2-file 2>/dev/null
 # --- pastas ------------------------------------------------------------------
 BUILD    := build
 OBJ      := $(BUILD)/obj
-SRC_DIRS := arch kernel lib mm gfx fs drivers
+SRC_DIRS := arch kernel lib mm gfx fs drivers locale
 
 # --- saidas ------------------------------------------------------------------
 KERNEL_ELF := $(BUILD)/orion.elf
@@ -61,7 +61,8 @@ $(OBJ)/lib/string.o: CFLAGS += -fno-tree-loop-distribute-patterns
 # --- QEMU --------------------------------------------------------------------
 QEMU_FLAGS := -machine pc -m 128M \
               -drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
-              -debugcon file:$(BUILD)/debug.log
+              -debugcon file:$(BUILD)/debug.log \
+              -display gtk,zoom-to-fit=on
 
 .PHONY: all kernel iso img run run-native run-text run-grub grub disk web \
         test size clean distclean rebuild help
@@ -75,6 +76,15 @@ iso: $(ISO)
 img: $(IMG)
 grub: iso
 disk: $(DATA_IMG)
+
+# --- catalogos de idioma ------------------------------------------------------
+LOCALE_HEADER := locale/orionLeng_catalog.h
+LOCALE_SOURCE := locale/languages/pt-BR.lang
+
+$(LOCALE_HEADER): $(LOCALE_SOURCE) tools/gen_locale.py
+	python3 tools/gen_locale.py $(LOCALE_SOURCE) $@
+
+$(OBJ)/locale/orionLeng.o: $(LOCALE_HEADER)
 
 # --- compilacao --------------------------------------------------------------
 # make V=1 mostra os comandos completos

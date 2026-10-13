@@ -1,0 +1,39 @@
+/* Gerado automaticamente. Não editar manualmente. */
+#ifndef ORION_LENG_CATALOG_GENERATED_H
+#define ORION_LENG_CATALOG_GENERATED_H
+
+static const orionLeng_translation_t orionLeng_pt_BR_catalog[] = {
+    {"system.name", "Orion OS"},
+    {"system.welcome", "Bem-vindo ao Orion OS"},
+    {"system.language", "Idioma do sistema"},
+    {"menu.start", "Iniciar"},
+    {"menu.settings", "Configurações"},
+    {"menu.files", "Arquivos"},
+    {"menu.terminal", "Terminal"},
+    {"settings.title", "Configurações"},
+    {"settings.language", "Idioma"},
+    {"settings.language_description", "Selecione o idioma do sistema"},
+    {"action.ok", "OK"},
+    {"action.cancel", "Cancelar"},
+    {"action.close", "Fechar"},
+    {"action.shutdown", "Desligar"},
+    {"action.restart", "Reiniciar"},
+    {"action.back", "Voltar"},
+    {"status.enabled", "Ativado"},
+    {"status.disabled", "Desativado"},
+    {"status.loading", "Carregando"},
+    {"status.error", "Ocorreu um erro"},
+    {"language.pt-BR", "Português (Brasil)"},
+    {"ui.version", "OrionGFD 0.1.0"},
+    {"ui.interface", "Interface grafica do Orion OS"},
+    {"ui.mouse_active", "Mouse: ativo"},
+    {"ui.mouse_missing", "Mouse: nao detectado"},
+    {"ui.drag_hint1", "Arraste a barra de titulo para"},
+    {"ui.drag_hint2", "mover. A barra inferior abre e"},
+    {"ui.drag_hint3", "oculta as janelas."},
+};
+
+#define ORION_LENG_PT_BR_CATALOG_COUNT \
+    (sizeof(orionLeng_pt_BR_catalog) / sizeof(orionLeng_pt_BR_catalog[0]))
+
+#endif

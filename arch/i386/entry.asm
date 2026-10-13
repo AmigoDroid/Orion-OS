@@ -24,10 +24,10 @@ align 4
     ; esta desligado (o kernel e ELF), mas o GRUB le o pedido de video no
     ; offset 32, entao estes 5 dwords precisam existir.
     dd 0, 0, 0, 0, 0
-    ; Pedido de video: modo grafico linear 800x600x32.
+       ; Pedido de video: modo grafico linear 1280x720x32.
     dd 0
-    dd 800
-    dd 600
+    dd 1280
+    dd 720
     dd 32
 
 section .text.entry

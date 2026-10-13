@@ -30,6 +30,14 @@
 - Apps: Arquivos, Editor, Terminal, Usuarios (admin) e Configuracoes (papel de parede, senha).
 - Servidor reescrito sem Express: zero dependencias, nao precisa de `npm install` nem de internet.
 
+## 0.6.0 - OrionFS v3
+
+- Sistema de arquivos novo: pastas, caminhos (`.`/`..`), arquivos de ate ~8 MiB, bitmaps, cache de blocos, permissoes, datas, `fsck`. Ver `docs/ORIONFS.md`.
+- Shell: `cd pwd mkdir rmdir touch append cat rm cp mv stat chmod tree df fsck sync fstest`; prompt com a pasta atual.
+- Driver ATA identifica o disco (modelo e tamanho) e faz FLUSH CACHE. Driver de RTC (CMOS) para datas.
+- Teclado ABNT2: `/` e `?` (tecla extra e AltGr+Q/W) e aspas simples/duplas.
+- `format` agora exige `format sim`. Formato v3 nao le discos v2.
+
 ## 0.5.0 - Memoria, boot unico e tratamento de falhas
 
 - Gerenciador de memoria completo: PMM (bitmap), heap com canario/veneno/coalescencia, VMM (paginacao). Ver `docs/MEMORY.md`.

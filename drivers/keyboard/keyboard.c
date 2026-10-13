@@ -7,6 +7,7 @@ static int shift_left;
 static int shift_right;
 static int caps_lock;
 static int extended;
+static int altgr;
 
 static inline u8 inb(unsigned short port)
 {
@@ -27,6 +28,7 @@ void keyboard_initialize(void)
     shift_right = 0;
     caps_lock = 0;
     extended = 0;
+    altgr = 0;
 }
 
 /*
@@ -41,8 +43,22 @@ static int map_scancode(u8 sc, int shift)
 {
     int c = -1;
 
+    /* ABNT2: AltGr+Q = '/'  AltGr+W = '?'  AltGr+E = '°'.
+     * E o jeito de digitar '/' e '?' em notebooks sem a tecla extra. */
+    if (altgr) {
+        switch (sc) {
+            case 0x10: return '/';
+            case 0x11: return '?';
+            case 0x12: return 0xF8;                 /* ° em CP437 */
+            default: break;
+        }
+    }
+
     switch (sc) {
         case 0x01: return 27;
+
+        /* Tecla a esquerda do 1: aspas simples e duplas no ABNT2 */
+        case 0x29: c = shift ? '"' : '\''; break;
         case 0x02: c = shift ? '!' : '1'; break;
         case 0x03: c = shift ? '@' : '2'; break;
         case 0x04: c = shift ? '#' : '3'; break;
@@ -92,8 +108,9 @@ static int map_scancode(u8 sc, int shift)
 
         case 0x2B: c = shift ? '}' : ']'; break;
 
-        /* Tecla extra do teclado brasileiro */
+        /* Teclas extras do teclado brasileiro */
         case 0x56: c = shift ? '|' : '\\'; break;
+        case 0x73: c = shift ? '?' : '/'; break;     /* a que fica antes do Shift direito */
 
         case 0x2C: c = 'z'; break;
         case 0x2D: c = 'x'; break;
@@ -144,6 +161,10 @@ int keyboard_getchar(void)
         if (extended) {
             extended = 0;
 
+            if (sc == 0x38) {                       /* AltGr (Alt direito) */
+                altgr = !released;
+                continue;
+            }
             if (released)
                 continue;
 

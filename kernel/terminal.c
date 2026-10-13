@@ -1,6 +1,6 @@
 
 #include "terminal.h"
-#include "gfd.h"
+#include "../gfx/gfd.h"
 #include "log.h"
 #include "io.h"
 

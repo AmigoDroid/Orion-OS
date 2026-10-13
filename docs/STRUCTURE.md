@@ -4,10 +4,10 @@
     boot/        bootloader proprio (stage1, stage2, layout.inc) e grub/grub.cfg
     kernel/      main.c, shell.c, terminal.c, log.c, panic.c
     mm/          pmm.c, heap.c, vmm.c, mm.c, memtest.c, mm.h
-    lib/         string.c (mem*/str*), kprintf.c
+    lib/         string.c (mem*/str*), kprintf.c, crc32.c
     gfx/         OrionGFD: gfd.c, gfd.h, gfd_font.h
-    drivers/     ata, keyboard, mouse, pci, usb/, core/ (placeholders vazios)
-    fs/          OrionFS
+    drivers/     ata, keyboard, mouse, pci, rtc, usb/, core/ (placeholders vazios)
+    fs/          OrionFS v3: fs.c (nucleo), bcache.c, fsck.c, fstest.c, fs.h (API), fs_internal.h (formato)
     include/     cabecalhos usados por varios modulos (multiboot, log, terminal, kprintf, panic, string, version)
     tools/       test_boot.py (testes automaticos no QEMU)
     docs/        documentacao e VERSION (fonte unica da versao)
