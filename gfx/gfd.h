@@ -12,6 +12,13 @@
 int  gfd_init(unsigned int multiboot_address);
 int  gfd_active(void);
 
+/* Selecao de fontes bitmap do OrionGFD. */
+int gfd_set_font(unsigned int index);
+unsigned int gfd_get_font(void);
+unsigned int gfd_font_count(void);
+const char *gfd_font_name(unsigned int index);
+const char *gfd_font_key(unsigned int index);
+
 /* Liga o buffer duplo (cena montada na RAM, copiada inteira para a tela).
  * Chamar DEPOIS de mm_init(). Devolve 1 se ligou; 0 se nao ha GFD ou
  * memoria (nesse caso o GFD continua funcionando, so que piscando). */

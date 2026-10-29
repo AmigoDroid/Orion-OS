@@ -17,7 +17,7 @@ typedef struct {
  * Outros idiomas poderão ser adicionados sem mudar a API pública.
  */
 static const orionLeng_language_t available_languages[] = {
-    {"pt-BR", "Português (Brasil)"}
+    {"pt-BR", "Português (Brasil)"},{"pt-BR-MA","Português (Maranhece)"}
 };
 
 #define ORION_LENG_LANGUAGE_COUNT \

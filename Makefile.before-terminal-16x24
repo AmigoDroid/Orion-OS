@@ -1,0 +1,227 @@
+# =============================================================================
+# Orion OS - Makefile unico
+#
+# Ha UM kernel (build/orion.elf) e DUAS formas de dar boot nele, as duas
+# entregando exatamente o mesmo contrato Multiboot (EAX=magic, EBX=info):
+#
+#   make iso      -> build/orion.iso   (GRUB: grafico OrionGFD ou texto)
+#   make img      -> build/orion.img   (bootloader proprio, disquete 1,44 MB)
+#
+# `make` sozinho gera os dois. `make help` lista tudo.
+# Para acrescentar um .c/.asm novo basta cria-lo dentro de uma das pastas
+# de codigo: o Makefile descobre sozinho (nada de lista de objetos manual).
+# =============================================================================
+
+VERSION := $(strip $(shell cat docs/VERSION 2>/dev/null || echo dev))
+
+# --- ferramentas -------------------------------------------------------------
+NASM  ?= nasm
+CC    ?= gcc
+LD    ?= ld
+NM    ?= nm
+OBJCOPY ?= objcopy
+QEMU  ?= qemu-system-i386
+GRUB_MKRESCUE := $(firstword $(shell command -v grub-mkrescue grub2-mkrescue 2>/dev/null))
+GRUB_FILE     := $(firstword $(shell command -v grub-file grub2-file 2>/dev/null))
+
+# --- pastas ------------------------------------------------------------------
+BUILD    := build
+OBJ      := $(BUILD)/obj
+SRC_DIRS := arch kernel lib mm gfx fs drivers locale
+
+# --- saidas ------------------------------------------------------------------
+KERNEL_ELF := $(BUILD)/orion.elf
+KERNEL_BIN := $(BUILD)/orion.bin
+ISO        := $(BUILD)/orion.iso
+IMG        := $(BUILD)/orion.img
+DATA_IMG   := $(BUILD)/orion-data.img
+STAGE1_BIN := $(BUILD)/stage1.bin
+STAGE2_BIN := $(BUILD)/stage2.bin
+ISO_DIR    := $(BUILD)/iso
+
+# --- fontes descobertos automaticamente --------------------------------------
+C_SRCS   := $(shell find $(SRC_DIRS) -name '*.c' | sort)
+ASM_SRCS := $(shell find $(SRC_DIRS) -name '*.asm' | sort)
+OBJS     := $(C_SRCS:%.c=$(OBJ)/%.o) $(ASM_SRCS:%.asm=$(OBJ)/%.o)
+INCDIRS  := include $(sort $(patsubst %/,%,$(dir $(shell find $(SRC_DIRS) include -name '*.h'))))
+
+CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-pie \
+          -fno-stack-protector -fno-asynchronous-unwind-tables \
+          -fcf-protection=none -mno-sse -mno-mmx -mno-80387 \
+          -Wall -Wextra -Wno-unused-parameter \
+          -DORION_VERSION=\"$(VERSION)\" \
+          $(addprefix -I,$(INCDIRS)) -MMD -MP
+
+LDFLAGS := -m elf_i386 -nostdlib -z max-page-size=0x1000 -z noseparate-code \
+           --build-id=none -T arch/i386/linker.ld
+
+# memset/memcpy nao podem virar chamadas a si mesmos:
+$(OBJ)/lib/string.o: CFLAGS += -fno-tree-loop-distribute-patterns
+
+# --- QEMU --------------------------------------------------------------------
+QEMU_FLAGS := -machine pc -m 128M \
+              -drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
+              -debugcon file:$(BUILD)/debug.log \
+              -display gtk,zoom-to-fit=on
+
+.PHONY: all kernel iso img run run-native run-text run-grub grub disk web \
+        test size clean distclean rebuild help
+
+all: iso img
+	@echo
+	@echo "Orion $(VERSION) pronto:  $(ISO)  e  $(IMG)"
+
+kernel: $(KERNEL_ELF)
+iso: $(ISO)
+img: $(IMG)
+grub: iso
+disk: $(DATA_IMG)
+
+# --- catalogos de idioma ------------------------------------------------------
+LOCALE_HEADER := locale/orionLeng_catalog.h
+LOCALE_SOURCE := locale/languages/pt-BR.lang
+
+$(LOCALE_HEADER): $(LOCALE_SOURCE) tools/gen_locale.py
+	python3 tools/gen_locale.py $(LOCALE_SOURCE) $@
+
+
+# --- catalogo automatico de fontes TrueType -------------------------------
+FONT_HEADER := gfx/orion_fonts_data.h
+
+.PHONY: FORCE
+FORCE:
+
+$(FONT_HEADER): FORCE tools/gen_fonts.py
+	python3 tools/gen_fonts.py font $@
+
+$(OBJ)/gfx/orion_fonts.o: $(FONT_HEADER)
+
+
+# --- bitmap da fonte TrueType usada nos titulos ----------------------------
+TITLE_FONT_HEADER := gfx/orion_title_font_data.h
+
+$(TITLE_FONT_HEADER): FORCE tools/gen_title_font.py font/after_burner_neue/After\ Burner\ Neue.ttf
+	python3 tools/gen_title_font.py
+
+# --- bitmaps das fontes selecionaveis do sistema ----------------------------
+SYSTEM_FONT_HEADER := gfx/orion_system_fonts_data.h
+
+$(SYSTEM_FONT_HEADER): FORCE tools/gen_system_fonts.py
+	python3 tools/gen_system_fonts.py
+
+$(OBJ)/gfx/gfd.o: $(TITLE_FONT_HEADER) $(SYSTEM_FONT_HEADER)
+
+
+
+$(OBJ)/locale/orionLeng.o: $(LOCALE_HEADER)
+
+# --- compilacao --------------------------------------------------------------
+# make V=1 mostra os comandos completos
+Q := $(if $(V),,@)
+$(OBJ)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "  CC   $<"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: %.asm
+	@mkdir -p $(dir $@)
+	@echo "  ASM  $<"
+	$(Q)$(NASM) -f elf32 $< -o $@
+
+$(KERNEL_ELF): $(OBJS) arch/i386/linker.ld
+	@echo "  LD   $@"
+	$(Q)$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	@$(NM) $@ | grep -q ' T _start$$' || { echo "ERRO: _start nao encontrado"; exit 1; }
+
+$(KERNEL_BIN): $(KERNEL_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+# --- ISO (GRUB) --------------------------------------------------------------
+$(ISO): $(KERNEL_ELF) boot/grub/grub.cfg
+	@test -n "$(GRUB_MKRESCUE)" || { echo "ERRO: grub-mkrescue nao encontrado (instale grub-pc-bin, xorriso e mtools)"; exit 1; }
+	@if [ -n "$(GRUB_FILE)" ]; then $(GRUB_FILE) --is-x86-multiboot $< || { echo "ERRO: header Multiboot invalido em $<"; exit 1; }; fi
+	rm -rf $(ISO_DIR)
+	mkdir -p $(ISO_DIR)/boot/grub
+	cp $(KERNEL_ELF) $(ISO_DIR)/boot/orion.elf
+	cp boot/grub/grub.cfg $(ISO_DIR)/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) > $(BUILD)/grub-mkrescue.log 2>&1 || { cat $(BUILD)/grub-mkrescue.log; exit 1; }
+	@echo "ISO (GRUB):  $@"
+
+# --- imagem de disquete (bootloader proprio) ---------------------------------
+# O stage2 recebe o tamanho e a entrada REAIS do kernel por -D: nada de
+# "64 setores" fixos nem de limite de 32 KiB.
+$(STAGE2_BIN): boot/stage2.asm boot/layout.inc $(KERNEL_BIN) $(KERNEL_ELF)
+	@mkdir -p $(BUILD)
+	$(NASM) -f bin -I boot/ \
+	  -DKERNEL_BYTES=$$(stat -c %s $(KERNEL_BIN)) \
+	  -DKERNEL_ENTRY=0x$$($(NM) $(KERNEL_ELF) | awk '$$3=="_start"{print $$1}') \
+	  $< -o $@
+	@test "$$(stat -c %s $@)" -eq 3072 || { echo "ERRO: stage2 deve ter 3072 bytes (STAGE2_SECTORS)"; exit 1; }
+
+$(STAGE1_BIN): boot/stage1.asm boot/layout.inc
+	@mkdir -p $(BUILD)
+	$(NASM) -f bin -I boot/ $< -o $@
+	@test "$$(stat -c %s $@)" -eq 512 || { echo "ERRO: stage1 deve ter 512 bytes"; exit 1; }
+
+$(IMG): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
+	cat $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) > $@
+	truncate -s 1474560 $@
+	@echo "Imagem (bootloader proprio): $@  (kernel: $$(stat -c %s $(KERNEL_BIN)) bytes)"
+
+# --- disco de dados ----------------------------------------------------------
+$(DATA_IMG):
+	@mkdir -p $(BUILD)
+	dd if=/dev/zero of=$@ bs=1M count=1 2>/dev/null
+
+# --- executar ----------------------------------------------------------------
+# BOOT=grub (padrao) ou BOOT=native:  make run BOOT=native
+BOOT ?= grub
+
+run: $(DATA_IMG)
+ifeq ($(BOOT),native)
+	$(MAKE) --no-print-directory run-native
+else
+	$(MAKE) --no-print-directory run-grub
+endif
+
+run-grub: $(ISO) $(DATA_IMG)
+	$(QEMU) $(QEMU_FLAGS) -cdrom $(ISO) -boot d
+
+run-native: $(IMG) $(DATA_IMG)
+	$(QEMU) $(QEMU_FLAGS) -drive format=raw,file=$(IMG),if=floppy -boot a
+
+# --- testes automaticos (QEMU sem janela) ------------------------------------
+test: iso img $(DATA_IMG)
+	python3 tools/test_boot.py --qemu $(QEMU) --build $(BUILD)
+
+size: $(KERNEL_ELF)
+	@size $(KERNEL_ELF)
+	@echo "kernel.bin: $$(stat -c %s $(KERNEL_BIN) 2>/dev/null || echo '-') bytes"
+
+web:
+	@test -d web || { echo "pasta web/ nao existe neste projeto"; exit 1; }
+	cd web && node server.js
+
+# --- limpeza -----------------------------------------------------------------
+clean:
+	@if [ -d $(BUILD) ]; then find $(BUILD) -mindepth 1 ! -name orion-data.img ! -name .gitkeep -delete; fi
+
+distclean:
+	rm -rf $(BUILD)
+
+rebuild: clean
+	$(MAKE) all
+
+help:
+	@echo "Orion OS $(VERSION)"
+	@echo
+	@echo "  make            compila o kernel e gera a ISO (GRUB) e a imagem (bootloader proprio)"
+	@echo "  make iso        so a ISO do GRUB"
+	@echo "  make img        so a imagem do bootloader proprio"
+	@echo "  make run        abre no QEMU (BOOT=grub, padrao) -- ou: make run BOOT=native"
+	@echo "  make test       boot automatico das duas imagens + autoteste de memoria"
+	@echo "  make size       tamanho das secoes do kernel"
+	@echo "  make clean      apaga tudo em build/ menos o disco de dados"
+	@echo "  make distclean  apaga build/ inteiro (inclusive o disco de dados)"
+
+-include $(OBJS:.o=.d)

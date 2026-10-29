@@ -14,6 +14,9 @@
 #include "version.h"
 #include "mm.h"
 #include "string.h"
+#include "orion_title_font_data.h"
+#include "orion_system_fonts_data.h"
+#include "orion_terminal_fonts_data.h"
 
 /* ------------------------------------------------------------------ */
 /* Constantes e estado                                                */
@@ -26,8 +29,8 @@
 #define TASKBAR_H   32
 #define PAD         4
 #define BTN_W       112
-#define CON_COLS    64
-#define CON_ROWS    24
+#define CON_MAX_COLS 128
+#define CON_MAX_ROWS 64
 
 enum { WIN_TERMINAL = 0, WIN_ABOUT = 1, WIN_COUNT = 2 };
 
@@ -44,6 +47,7 @@ static int screen_w, screen_h;
 static uint32_t screen_pitch;
 static uint8_t shift_r, shift_g, shift_b;
 static int active;
+static unsigned int selected_font;
 
 static gfd_window_t win[WIN_COUNT];
 static int zorder[WIN_COUNT];           /* zorder[WIN_COUNT-1] = topo */
@@ -52,7 +56,8 @@ static int scene_dirty;
 static int cursor_dirty;
 
 /* console */
-static char con_cells[CON_ROWS][CON_COLS];
+static int con_cols = 36, con_rows = 15;
+static char con_cells[CON_MAX_ROWS][CON_MAX_COLS];
 static int con_row, con_col;
 
 /* mouse */
@@ -140,16 +145,50 @@ static const unsigned char gfd_glyph_ccedilla[16] = {
 0x22, 0x1C, 0x08, 0x10,
 0x20, 0x00, 0x00, 0x00
 };
+static const uint8_t *glyph_for_codepoint(uint32_t codepoint)
+{
+    if (codepoint >= ORION_SYSTEM_FONT_FIRST_CODE &&
+        codepoint <= 255) {
+        return orion_system_font_glyphs[selected_font]
+            [codepoint - ORION_SYSTEM_FONT_FIRST_CODE];
+    }
+
+    return orion_font_glyph(codepoint);
+}
+
 static void draw_char(int x, int y, uint32_t codepoint,
                       uint32_t fg, uint32_t bg, int opaque)
 {
-    const uint8_t *g = orion_font_glyph(codepoint);
+    const uint8_t *g = glyph_for_codepoint(codepoint);
 
     for (int r = 0; r < FONT_H; r++) {
         unsigned char bits = g[r];
 
         for (int c = 0; c < FONT_W; c++) {
             if (bits & (0x80u >> c))
+                pixel(x + c, y + r, fg);
+            else if (opaque)
+                pixel(x + c, y + r, bg);
+        }
+    }
+}
+
+/* Desenha um byte CP437 usando a fonte maior exclusiva do terminal. */
+static void draw_terminal_char(int x, int y, unsigned char ch,
+                              uint32_t fg, uint32_t bg, int opaque)
+{
+    if (ch < ORION_TERMINAL_FONT_FIRST_CODE)
+        ch = ' ';
+
+    const uint16_t *glyph =
+        orion_terminal_font_glyphs[selected_font]
+        [ch - ORION_TERMINAL_FONT_FIRST_CODE];
+
+    for (int r = 0; r < ORION_TERMINAL_FONT_HEIGHT; r++) {
+        uint16_t bits = glyph[r];
+
+        for (int c = 0; c < ORION_TERMINAL_FONT_WIDTH; c++) {
+            if (bits & (0x8000u >> c))
                 pixel(x + c, y + r, fg);
             else if (opaque)
                 pixel(x + c, y + r, bg);
@@ -209,23 +248,74 @@ static uint32_t utf8_next(const char **cursor)
     return '?';
 }
 
+/*
+ * Calcula os limites visiveis do glifo dentro da celula 8x16.
+ * O console continua usando celulas fixas; somente draw_text
+ * utiliza o espacamento proporcional.
+ */
+static int glyph_bounds(uint32_t codepoint, int *left, int *right)
+{
+    const uint8_t *g = glyph_for_codepoint(codepoint);
+    int min_x = FONT_W;
+    int max_x = -1;
+
+    for (int r = 0; r < FONT_H; r++) {
+        for (int c = 0; c < FONT_W; c++) {
+            if (g[r] & (0x80u >> c)) {
+                if (c < min_x) min_x = c;
+                if (c > max_x) max_x = c;
+            }
+        }
+    }
+
+    if (max_x < min_x) {
+        *left = 0;
+        *right = -1;
+        return 0;
+    }
+
+    *left = min_x;
+    *right = max_x;
+    return max_x - min_x + 1;
+}
+
+static int glyph_advance(uint32_t codepoint)
+{
+    int left, right;
+    int width = glyph_bounds(codepoint, &left, &right);
+
+    /* Espaco entre palavras: menor que uma letra normal. */
+    if (width == 0)
+        return codepoint == ' ' ? 4 : 5;
+
+    /* Um pixel de separacao entre letras. */
+    return width + 1;
+}
+
+static int text_width(const char *s)
+{
+    int width = 0;
+
+    while (*s) {
+        uint32_t cp = utf8_next(&s);
+        width += glyph_advance(cp);
+    }
+
+    return width;
+}
+
 static void draw_text(int x, int y, const char *s, uint32_t fg)
 {
     while (*s) {
         uint32_t cp = utf8_next(&s);
-        draw_char(x, y, cp, fg, 0, 0);
-        x += FONT_W;
-    }
-}
+        int left, right;
+        int width = glyph_bounds(cp, &left, &right);
 
-static int text_len(const char *s)
-{
-    int n = 0;
-    while (*s) {
-        (void)utf8_next(&s);
-        n++;
+        if (width > 0)
+            draw_char(x - left, y, cp, fg, 0, 0);
+
+        x += width > 0 ? width + 1 : (cp == ' ' ? 4 : 5);
     }
-    return n;
 }
 
 static char *append(char *p, const char *s)
@@ -438,19 +528,26 @@ static void draw_console(const gfd_window_t *w)
 
     fill_rect(w->x, w->y + TITLE_H, w->w, w->h - TITLE_H, c_con_bg);
 
-    for (int r = 0; r < CON_ROWS; r++)
-        for (int c = 0; c < CON_COLS; c++) {
+    for (int r = 0; r < con_rows; r++)
+        for (int c = 0; c < con_cols; c++) {
             char ch = con_cells[r][c];
             if (ch != ' ')
-                draw_char(ox + c * FONT_W, oy + r * FONT_H, ch,
-                          c_con_fg, c_con_bg, 0);
+                draw_terminal_char(
+                    ox + c * ORION_TERMINAL_FONT_WIDTH,
+                    oy + r * ORION_TERMINAL_FONT_HEIGHT,
+                    (unsigned char)ch, c_con_fg, c_con_bg, 0);
         }
 
-    /* cursor de texto: bloco com o caractere invertido */
-    fill_rect(ox + con_col * FONT_W, oy + con_row * FONT_H,
-              FONT_W, FONT_H, c_con_fg);
-    draw_char(ox + con_col * FONT_W, oy + con_row * FONT_H,
-              con_cells[con_row][con_col], c_con_bg, c_con_fg, 0);
+    /* Cursor com o mesmo tamanho dos caracteres do terminal. */
+    fill_rect(ox + con_col * ORION_TERMINAL_FONT_WIDTH,
+              oy + con_row * ORION_TERMINAL_FONT_HEIGHT,
+              ORION_TERMINAL_FONT_WIDTH,
+              ORION_TERMINAL_FONT_HEIGHT, c_con_fg);
+    draw_terminal_char(
+        ox + con_col * ORION_TERMINAL_FONT_WIDTH,
+        oy + con_row * ORION_TERMINAL_FONT_HEIGHT,
+        (unsigned char)con_cells[con_row][con_col],
+        c_con_bg, c_con_fg, 0);
 }
 
 static void draw_about(const gfd_window_t *w)
@@ -511,7 +608,7 @@ static void draw_scene(void)
     fill_rect(19, 6, 4, 16, c_white);
     fill_rect(26, 6, 4, 16, c_accent);
     draw_text(42, 6, "OrionGFD", c_white);
-    draw_text(screen_w - 16 - (int)(sizeof("Orion OS " ORION_VERSION) - 1) * FONT_W, 6,
+    draw_text(screen_w - 16 - text_width("Orion OS " ORION_VERSION), 6,
               "Orion OS " ORION_VERSION, c_muted);
 
     for (int i = 0; i < WIN_COUNT; i++) {
@@ -534,7 +631,7 @@ static void draw_scene(void)
         fill_rect(bx, ty + 4, BTN_W, 24, bg);
         if (win[i].visible)
             fill_rect(bx, ty + 26, BTN_W, 2, i == top ? c_accent : c_muted);
-        draw_text(bx + (BTN_W - text_len(win[i].title) * FONT_W) / 2, ty + 8,
+        draw_text(bx + (BTN_W - text_width(win[i].title)) / 2, ty + 8,
                   win[i].title, win[i].visible ? c_white : c_muted);
     }
 }
@@ -545,8 +642,8 @@ static void draw_scene(void)
 
 static void con_clear_cells(void)
 {
-    for (int r = 0; r < CON_ROWS; r++)
-        for (int c = 0; c < CON_COLS; c++)
+    for (int r = 0; r < con_rows; r++)
+        for (int c = 0; c < con_cols; c++)
             con_cells[r][c] = ' ';
     con_row = 0;
     con_col = 0;
@@ -554,14 +651,14 @@ static void con_clear_cells(void)
 
 static void con_scroll(void)
 {
-    for (int r = 1; r < CON_ROWS; r++)
-        for (int c = 0; c < CON_COLS; c++)
+    for (int r = 1; r < con_rows; r++)
+        for (int c = 0; c < con_cols; c++)
             con_cells[r - 1][c] = con_cells[r][c];
 
-    for (int c = 0; c < CON_COLS; c++)
-        con_cells[CON_ROWS - 1][c] = ' ';
+    for (int c = 0; c < con_cols; c++)
+        con_cells[con_rows - 1][c] = ' ';
 
-    con_row = CON_ROWS - 1;
+    con_row = con_rows - 1;
 }
 
 int gfd_console_putchar(char c)
@@ -587,13 +684,13 @@ int gfd_console_putchar(char c)
     } else {
         con_cells[con_row][con_col] = c;
         con_col++;
-        if (con_col >= CON_COLS) {
+        if (con_col >= con_cols) {
             con_col = 0;
             con_row++;
         }
     }
 
-    if (con_row >= CON_ROWS)
+    if (con_row >= con_rows)
         con_scroll();
 
     scene_dirty = 1;
@@ -725,6 +822,40 @@ int gfd_active(void)
     return active;
 }
 
+int gfd_set_font(unsigned int index)
+{
+    if (index >= ORION_SYSTEM_FONT_COUNT)
+        return 0;
+
+    selected_font = index;
+    scene_dirty = 1;
+    return 1;
+}
+
+unsigned int gfd_get_font(void)
+{
+    return selected_font;
+}
+
+unsigned int gfd_font_count(void)
+{
+    return ORION_SYSTEM_FONT_COUNT;
+}
+
+const char *gfd_font_name(unsigned int index)
+{
+    if (index >= ORION_SYSTEM_FONT_COUNT)
+        return 0;
+    return orion_system_font_names[index];
+}
+
+const char *gfd_font_key(unsigned int index)
+{
+    if (index >= ORION_SYSTEM_FONT_COUNT)
+        return 0;
+    return orion_system_font_keys[index];
+}
+
 void gfd_poll(void)
 {
     if (!active)
@@ -809,12 +940,22 @@ int gfd_init(unsigned int multiboot_address)
     screen_pitch = info->fb_pitch;
 
     init_palette();
+
+    con_cols = (screen_w - 32 - 2 * PAD) / ORION_TERMINAL_FONT_WIDTH;
+    if (con_cols < 1) con_cols = 1;
+    if (con_cols > CON_MAX_COLS) con_cols = CON_MAX_COLS;
+
+    con_rows = (screen_h - TASKBAR_H - (TOPBAR_H + 14)
+                - TITLE_H - 2 * PAD) / ORION_TERMINAL_FONT_HEIGHT;
+    if (con_rows < 1) con_rows = 1;
+    if (con_rows > CON_MAX_ROWS) con_rows = CON_MAX_ROWS;
+
     con_clear_cells();
 
-    /* Janela Terminal: area de texto CON_COLS x CON_ROWS. */
+    /* Janela Terminal: area de texto con_cols x con_rows. */
     win[WIN_TERMINAL].title   = "Terminal";
-    win[WIN_TERMINAL].w       = CON_COLS * FONT_W + 2 * PAD;
-    win[WIN_TERMINAL].h       = TITLE_H + CON_ROWS * FONT_H + 2 * PAD;
+    win[WIN_TERMINAL].w       = con_cols * ORION_TERMINAL_FONT_WIDTH + 2 * PAD;
+    win[WIN_TERMINAL].h       = TITLE_H + con_rows * ORION_TERMINAL_FONT_HEIGHT + 2 * PAD;
     win[WIN_TERMINAL].x       = 16;
     win[WIN_TERMINAL].y       = TOPBAR_H + 14;
     win[WIN_TERMINAL].visible = 1;

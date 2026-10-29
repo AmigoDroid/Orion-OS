@@ -14,6 +14,7 @@
 #include "version.h"
 #include "mm.h"
 #include "string.h"
+#include "orion_title_font_data.h"
 
 /* ------------------------------------------------------------------ */
 /* Constantes e estado                                                */
@@ -140,10 +141,16 @@ static const unsigned char gfd_glyph_ccedilla[16] = {
 0x22, 0x1C, 0x08, 0x10,
 0x20, 0x00, 0x00, 0x00
 };
-static void draw_char(int x, int y, unsigned char ch,
+static void draw_char(int x, int y, uint32_t codepoint,
                       uint32_t fg, uint32_t bg, int opaque)
 {
-    const uint8_t *g = orion_font_glyph(ch);
+    const uint8_t *g;
+
+    if (codepoint >= 32 && codepoint <= 255) {
+        g = orion_system_glyphs[codepoint - 32];
+    } else {
+        g = orion_font_glyph(codepoint);
+    }
 
     for (int r = 0; r < FONT_H; r++) {
         unsigned char bits = g[r];
@@ -157,16 +164,75 @@ static void draw_char(int x, int y, unsigned char ch,
     }
 }
 
+
+/*
+ * Lê um ponto de código UTF-8. Em caso de sequência inválida,
+ * consome um byte e retorna '?' para não travar a renderização.
+ */
+static uint32_t utf8_next(const char **cursor)
+{
+    const unsigned char *s = (const unsigned char *)*cursor;
+    uint32_t cp;
+
+    if (s[0] < 0x80) {
+        *cursor = (const char *)(s + 1);
+        return s[0];
+    }
+
+    if (s[0] >= 0xC2 && s[0] <= 0xDF &&
+        (s[1] & 0xC0) == 0x80) {
+        cp = ((uint32_t)(s[0] & 0x1F) << 6) |
+             (uint32_t)(s[1] & 0x3F);
+        *cursor = (const char *)(s + 2);
+        return cp;
+    }
+
+    if (s[0] >= 0xE0 && s[0] <= 0xEF &&
+        (s[1] & 0xC0) == 0x80 &&
+        (s[2] & 0xC0) == 0x80 &&
+        !(s[0] == 0xE0 && s[1] < 0xA0) &&
+        !(s[0] == 0xED && s[1] >= 0xA0)) {
+        cp = ((uint32_t)(s[0] & 0x0F) << 12) |
+             ((uint32_t)(s[1] & 0x3F) << 6) |
+             (uint32_t)(s[2] & 0x3F);
+        *cursor = (const char *)(s + 3);
+        return cp;
+    }
+
+    if (s[0] >= 0xF0 && s[0] <= 0xF4 &&
+        (s[1] & 0xC0) == 0x80 &&
+        (s[2] & 0xC0) == 0x80 &&
+        (s[3] & 0xC0) == 0x80 &&
+        !(s[0] == 0xF0 && s[1] < 0x90) &&
+        !(s[0] == 0xF4 && s[1] > 0x8F)) {
+        cp = ((uint32_t)(s[0] & 0x07) << 18) |
+             ((uint32_t)(s[1] & 0x3F) << 12) |
+             ((uint32_t)(s[2] & 0x3F) << 6) |
+             (uint32_t)(s[3] & 0x3F);
+        *cursor = (const char *)(s + 4);
+        return cp;
+    }
+
+    *cursor = (const char *)(s + 1);
+    return '?';
+}
+
 static void draw_text(int x, int y, const char *s, uint32_t fg)
 {
-    for (; *s; s++, x += FONT_W)
-        draw_char(x, y, *s, fg, 0, 0);
+    while (*s) {
+        uint32_t cp = utf8_next(&s);
+        draw_char(x, y, cp, fg, 0, 0);
+        x += FONT_W;
+    }
 }
 
 static int text_len(const char *s)
 {
     int n = 0;
-    while (s[n]) n++;
+    while (*s) {
+        (void)utf8_next(&s);
+        n++;
+    }
     return n;
 }
 

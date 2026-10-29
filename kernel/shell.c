@@ -33,6 +33,7 @@ static char *skip_spaces(char *s)
 /* ---------------------------- comandos basicos ---------------------------- */
 
 static void cmd_help(char *args);
+static void cmd_font(char *args);
 
 static void cmd_clear(char *args)   { (void)args; terminal_initialize(); }
 static void cmd_pci(char *args)     { (void)args; pci_list_devices(); }
@@ -531,6 +532,40 @@ static void cmd_crash(char *args)
     }
 }
 
+static void cmd_font(char *args)
+{
+    args = skip_spaces(args ? args : "");
+
+    if (*args == '\\0') {
+        kprintf("Fontes do OrionGFD:\\n");
+        for (unsigned int i = 0; i < gfd_font_count(); i++) {
+            kprintf("  %-12s %s\\n",
+                    gfd_font_key(i),
+                    i == gfd_get_font() ? "<- selecionada" : "");
+        }
+        kprintf("Uso: font <afterburner|shadow|minecraft>\\n");
+        return;
+    }
+
+    if (!gfd_active()) {
+        kprintf("A troca de fontes exige a interface grafica OrionGFD.\\n");
+        return;
+    }
+
+    for (unsigned int i = 0; i < gfd_font_count(); i++) {
+        if (strcmp(args, gfd_font_key(i)) == 0) {
+            if (gfd_set_font(i))
+                kprintf("Fonte selecionada: %s\\n", gfd_font_name(i));
+            else
+                kprintf("Nao foi possivel selecionar essa fonte.\\n");
+            return;
+        }
+    }
+
+    kprintf("Fonte desconhecida: %s\\n", args);
+    kprintf("Digite 'font' para ver as opcoes.\\n");
+}
+
 /* ---------------------------- tabela ---------------------------- */
 
 typedef struct {
@@ -543,6 +578,7 @@ typedef struct {
 static const command_t commands[] = {
     { "help",      "",                 "Mostra esta ajuda",              cmd_help },
     { "info",      "",                 "Versao, bootloader e video",     cmd_info },
+    { "font",      "[nome]",           "Lista ou troca a fonte grafica", cmd_font },
     { "clear",     "",                 "Limpa a tela",                   cmd_clear },
     { "pci",       "",                 "Lista dispositivos PCI",         cmd_pci },
     { "usb",       "",                 "Controladores USB",              cmd_usb },

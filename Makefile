@@ -62,7 +62,7 @@ $(OBJ)/lib/string.o: CFLAGS += -fno-tree-loop-distribute-patterns
 QEMU_FLAGS := -machine pc -m 128M \
               -drive format=raw,file=$(DATA_IMG),if=ide,index=0 \
               -debugcon file:$(BUILD)/debug.log \
-              -display gtk,zoom-to-fit=on
+              #-display gtk,zoom-to-fit=on
 
 .PHONY: all kernel iso img run run-native run-text run-grub grub disk web \
         test size clean distclean rebuild help
@@ -84,7 +84,42 @@ LOCALE_SOURCE := locale/languages/pt-BR.lang
 $(LOCALE_HEADER): $(LOCALE_SOURCE) tools/gen_locale.py
 	python3 tools/gen_locale.py $(LOCALE_SOURCE) $@
 
+
+# --- catalogo automatico de fontes TrueType -------------------------------
+FONT_HEADER := gfx/orion_fonts_data.h
+
+.PHONY: FORCE
+FORCE:
+
+$(FONT_HEADER): FORCE tools/gen_fonts.py
+	python3 tools/gen_fonts.py font $@
+
+$(OBJ)/gfx/orion_fonts.o: $(FONT_HEADER)
+
+
+# --- bitmap da fonte TrueType usada nos titulos ----------------------------
+TITLE_FONT_HEADER := gfx/orion_title_font_data.h
+
+$(TITLE_FONT_HEADER): FORCE tools/gen_title_font.py font/after_burner_neue/After\ Burner\ Neue.ttf
+	python3 tools/gen_title_font.py
+
+# --- bitmaps das fontes selecionaveis do sistema ----------------------------
+SYSTEM_FONT_HEADER := gfx/orion_system_fonts_data.h
+
+$(SYSTEM_FONT_HEADER): FORCE tools/gen_system_fonts.py
+	python3 tools/gen_system_fonts.py
+
+$(OBJ)/gfx/gfd.o: $(TITLE_FONT_HEADER) $(SYSTEM_FONT_HEADER) $(TERMINAL_FONT_HEADER)
+
+
+
 $(OBJ)/locale/orionLeng.o: $(LOCALE_HEADER)
+
+# --- fonte bitmap exclusiva do terminal (16x24) ----------------------------
+TERMINAL_FONT_HEADER := gfx/orion_terminal_fonts_data.h
+
+$(TERMINAL_FONT_HEADER): FORCE tools/gen_terminal_font.py
+	python3 tools/gen_terminal_font.py
 
 # --- compilacao --------------------------------------------------------------
 # make V=1 mostra os comandos completos

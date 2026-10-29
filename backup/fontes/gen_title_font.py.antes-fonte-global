@@ -1,0 +1,44 @@
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+
+source = Path("font/after_burner_neue/After Burner Neue.ttf")
+output = Path("gfx/orion_title_font_data.h")
+
+font = ImageFont.truetype(str(source), 15)
+lines = [
+    "/* Gerado por tools/gen_title_font.py; nao editar. */",
+    "#ifndef ORION_TITLE_FONT_DATA_H",
+    "#define ORION_TITLE_FONT_DATA_H",
+    "#include <stdint.h>",
+    "static const uint16_t orion_title_glyphs[95][16] = {",
+]
+
+for code in range(32, 127):
+    ch = chr(code)
+    image = Image.new("L", (16, 16), 0)
+    draw = ImageDraw.Draw(image)
+    bbox = draw.textbbox((0, 0), ch, font=font)
+    width = bbox[2] - bbox[0]
+    height = bbox[3] - bbox[1]
+    x = (16 - width) // 2 - bbox[0]
+    y = (16 - height) // 2 - bbox[1]
+    draw.text((x, y), ch, font=font, fill=255)
+
+    lines.append("    {")
+    for row in range(16):
+        bits = 0
+        for col in range(16):
+            if image.getpixel((col, row)) >= 96:
+                bits |= 1 << (15 - col)
+        lines.append(f"        0x{bits:04X},")
+    lines.append("    },")
+
+lines += ["};", "#endif", ""]
+
+content = "\n".join(lines)
+if not output.exists() or output.read_text() != content:
+    output.write_text(content)
+
+print(f"Fonte convertida: {source}")
+print(f"Glifos gerados: 95")
+print(f"Arquivo: {output}")
